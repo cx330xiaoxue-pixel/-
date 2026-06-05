@@ -1,0 +1,26 @@
+# AI 辅助剧本创作工具 - 配置文件
+# AI-Assisted Script Creation Tool - Configuration
+
+# LLM API 配置 (支持 OpenAI 兼容接口)
+llm:
+  provider: "deepseek"          # deepseek, openai, custom
+  api_key: "sk-YOUR-API-KEY"    # 替换为你的 API Key
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+  temperature: 0.7
+  max_tokens: 4096
+
+# 文本处理配置
+processing:
+  window_size: 40               # 滑窗行数
+  overlap_rate: 0.5             # 窗口重叠率 (0-1)
+  max_workers: 4                # 并行处理线程数
+  retry_times: 3                # API 调用失败重试次数
+
+# 输出配置
+output:
+  format: "yaml"                # yaml (未来可扩展: json, markdown)
+  output_dir: "./output"
+  include_emotion: true         # 是否包含情绪标注
+  include_action: true          # 是否包含动作标注
+  language: "zh-CN"             # 输出语言
