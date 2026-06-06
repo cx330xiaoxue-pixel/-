@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 
 const NAV_ITEMS = [
-  { id: "pipeline", label: "Pipeline" },
-  { id: "dashboard", label: "Dashboard" },
-  { id: "write", label: "Script" },
-  { id: "review", label: "Review" },
-  { id: "export", label: "Export" },
+  { id: "pipeline", label: "管线" },
+  { id: "dashboard", label: "仪表盘" },
+  { id: "write", label: "剧本" },
+  { id: "review", label: "审核" },
+  { id: "export", label: "导出" },
 ];
 
 export default function Nav() {
@@ -76,7 +76,7 @@ export default function Nav() {
           onClick={() => scrollTo("pipeline")}
           className="px-4 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all duration-200 active:scale-[0.98]"
         >
-          Start Pipeline
+          启动管线
         </button>
       </div>
     </nav>

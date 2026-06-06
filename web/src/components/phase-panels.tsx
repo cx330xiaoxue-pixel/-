@@ -20,13 +20,13 @@ const DEFAULT_PROJECT = "青云之路";
 
 /* ── Tab definitions ── */
 const TABS = [
-  { id: "ingest", label: "Import", icon: Upload },
-  { id: "analyze", label: "Analysis", icon: ChartBar },
-  { id: "plan", label: "Planning", icon: TreeStructure },
-  { id: "write", label: "Script", icon: Article },
-  { id: "review", label: "Review", icon: CheckSquare },
-  { id: "storyboard", label: "Storyboard", icon: FilmStrip },
-  { id: "export", label: "Export", icon: Download },
+  { id: "ingest", label: "导入", icon: Upload },
+  { id: "analyze", label: "分析", icon: ChartBar },
+  { id: "plan", label: "规划", icon: TreeStructure },
+  { id: "write", label: "剧本", icon: Article },
+  { id: "review", label: "审核", icon: CheckSquare },
+  { id: "storyboard", label: "分镜", icon: FilmStrip },
+  { id: "export", label: "导出", icon: Download },
 ];
 
 /* ── Syntax-highlighted YAML viewer ── */
@@ -83,7 +83,7 @@ function PlaceholderPanel({
       <h3 className="text-lg font-semibold text-[#f4f4f5] mb-2">{title}</h3>
       <p className="text-sm text-[#a1a1aa] max-w-[400px]">{description}</p>
       <p className="mt-4 text-[11px] font-mono text-[#71717a]">
-        Run the pipeline to populate this section
+        运行管线以填充此区域
       </p>
     </div>
   );
@@ -126,7 +126,7 @@ function ScriptPanel() {
     <div className="flex flex-col gap-5">
       {/* Episode selector */}
       <div className="flex items-center gap-3">
-        <span className="text-sm text-[#71717a]">Episode:</span>
+        <span className="text-sm text-[#71717a]">集数:</span>
         {[1, 2, 3].map((ep) => (
           <button
             key={ep}
@@ -162,39 +162,39 @@ function ScriptPanel() {
               : "text-[#71717a] hover:text-[#a1a1aa]"
           }`}
         >
-          <Eye size={14} /> Preview
+          <Eye size={14} /> 预览
         </button>
       </div>
 
       {/* Content */}
       {loading ? (
         <div className="card-surface p-12 flex items-center justify-center">
-          <p className="text-sm text-[#71717a]">Loading script from API...</p>
+          <p className="text-sm text-[#71717a]">正在从API加载剧本...</p>
         </div>
       ) : error ? (
         <div className="card-surface p-12 flex flex-col items-center justify-center gap-3">
-          <p className="text-sm text-[#a1a1aa]">No script data available</p>
+          <p className="text-sm text-[#a1a1aa]">暂无剧本数据</p>
           <p className="text-[11px] font-mono text-[#71717a]">
-            Run the pipeline to generate scripts, or check that the API server is running.
+            运行管线以生成剧本，或检查API服务器是否正常运行。
           </p>
         </div>
       ) : view === "yaml" ? (
-        <YamlViewer content={script?.content || "# No script data yet\n# Run the pipeline to generate scripts"} />
+        <YamlViewer content={script?.content || "# 暂无剧本数据\n# 运行管线以生成剧本"} />
       ) : (
         <div className="card-surface p-8">
           <div className="max-w-[65ch] mx-auto space-y-6 text-sm leading-relaxed text-[#a1a1aa]">
             <h3 className="text-xl font-semibold text-[#f4f4f5]">
-              Episode {episode}: Script Preview
+              第{episode}集: 剧本预览
             </h3>
             <div className="flex items-center gap-4 text-[11px] font-mono text-[#71717a]">
-              <span>Scenes: {sceneCount}</span>
-              <span>Elements: {elementCount}</span>
-              <span>Path: {script?.path || "N/A"}</span>
+              <span>场次: {sceneCount}</span>
+              <span>元素: {elementCount}</span>
+              <span>路径: {script?.path || "无"}</span>
             </div>
             <p className="text-[#f4f4f5]">
               {script?.content
-                ? "Script loaded from API. Switch to YAML view for full syntax-highlighted content."
-                : "No script generated yet. Run the Write phase to generate episode scripts."}
+                ? "已从API加载剧本。切换到YAML视图查看完整语法高亮内容。"
+                : "尚未生成剧本。运行「编写」阶段以生成单集剧本。"}
             </p>
           </div>
         </div>
@@ -211,16 +211,16 @@ function AnalysisPanel() {
         <div className="flex items-center gap-2.5">
           <FileText size={18} className="text-[#d4a853]" />
           <h3 className="text-sm font-semibold text-[#f4f4f5]">
-            Analysis Report
+            分析报告
           </h3>
         </div>
         <div className="space-y-3 text-sm text-[#a1a1aa]">
           {[
-            ["Narrative Structure", "Three-Act"],
-            ["POV", "Third Person Limited"],
-            ["Pacing Score", "84/100"],
-            ["Adaptation Difficulty", "Medium"],
-            ["Recommended Medium", "TV Series"],
+            ["叙事结构", "三幕式"],
+            ["视角", "第三人称限知"],
+            ["节奏评分", "84/100"],
+            ["改编难度", "中等"],
+            ["推荐媒介", "电视剧"],
           ].map(([label, value]) => (
             <div
               key={label}
@@ -237,16 +237,16 @@ function AnalysisPanel() {
         <div className="flex items-center gap-2.5">
           <ChartBar size={18} className="text-[#d4a853]" />
           <h3 className="text-sm font-semibold text-[#f4f4f5]">
-            Character Network
+            角色关系网络
           </h3>
         </div>
         <div className="space-y-3 text-sm">
           {[
-            { name: "林逸", role: "Hero", relations: 8, arc: "Rising" },
-            { name: "老者", role: "Mentor", relations: 2, arc: "Exit" },
-            { name: "小翠", role: "Ally", relations: 4, arc: "Introduction" },
-            { name: "黑衣人", role: "Antagonist", relations: 5, arc: "Building" },
-            { name: "萧剑", role: "Rival", relations: 6, arc: "Foreshadowed" },
+            { name: "林逸", role: "主角", relations: 8, arc: "上升" },
+            { name: "老者", role: "导师", relations: 2, arc: "退场" },
+            { name: "小翠", role: "盟友", relations: 4, arc: "出场" },
+            { name: "黑衣人", role: "反派", relations: 5, arc: "发展" },
+            { name: "萧剑", role: "对手", relations: 6, arc: "伏笔" },
           ].map((char) => (
             <div
               key={char.name}
@@ -260,13 +260,13 @@ function AnalysisPanel() {
               </div>
               <div className="flex items-center gap-4">
                 <span className="text-[11px] text-[#71717a]">
-                  {char.relations} links
+                  {char.relations} 个关联
                 </span>
                 <span
                   className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${
-                    char.arc === "Rising" || char.arc === "Building"
+                    char.arc === "上升" || char.arc === "发展"
                       ? "bg-[#22c55e]/10 text-[#22c55e]"
-                      : char.arc === "Foreshadowed"
+                      : char.arc === "伏笔"
                       ? "bg-[#3b82f6]/10 text-[#3b82f6]"
                       : "bg-[#71717a]/10 text-[#71717a]"
                   }`}
@@ -286,20 +286,20 @@ function AnalysisPanel() {
 function ExportPanel() {
   const items = [
     {
-      label: "YAML Scripts",
-      desc: "All episodes in schema v2.0 YAML format with full metadata",
+      label: "YAML 剧本",
+      desc: "全部集数，Schema v2.0 YAML格式，含完整元数据",
       icon: Code,
       size: "~240 KB",
     },
     {
-      label: "Plain Text",
-      desc: "Standard screenplay format for external editing tools",
+      label: "纯文本",
+      desc: "标准剧本格式，兼容外部编辑工具",
       icon: FileText,
       size: "~180 KB",
     },
     {
-      label: "Storyboard Package",
-      desc: "Shot lists, frame descriptions, and visual reference bundle",
+      label: "分镜包",
+      desc: "镜头列表、帧描述和视觉参考合集",
       icon: ImageIcon,
       size: "~420 KB",
     },
@@ -325,7 +325,7 @@ function ExportPanel() {
             </p>
           </div>
           <button className="px-5 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all duration-200 active:scale-[0.98] shrink-0">
-            Download YAML
+            下载 YAML
           </button>
         </div>
 
@@ -344,7 +344,7 @@ function ExportPanel() {
             </p>
           </div>
           <button className="w-full mt-auto px-4 py-2 text-[13px] font-medium rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:border-[#3f3f46] transition-all duration-200 active:scale-[0.98]">
-            Download Text
+            下载文本
           </button>
         </div>
       </div>
@@ -366,7 +366,7 @@ function ExportPanel() {
           </p>
         </div>
         <button className="px-5 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all duration-200 active:scale-[0.98] shrink-0">
-          Download Package
+          下载分镜包
         </button>
       </div>
     </div>
@@ -383,8 +383,8 @@ export default function PhasePanels() {
         return (
           <PlaceholderPanel
             icon={Upload}
-            title="Import & Knowledge"
-            description="Upload source novels, scan for terminology, and build the knowledge registry for the adaptation pipeline."
+            title="导入与知识库"
+            description="上传源小说，扫描术语，为改编管线建立知识注册表。"
           />
         );
       case "analyze":
@@ -393,8 +393,8 @@ export default function PhasePanels() {
         return (
           <PlaceholderPanel
             icon={TreeStructure}
-            title="Episode Planning"
-            description="Chapter-to-episode mapping with emotion curve design and suspense hook generation."
+            title="分集规划"
+            description="章节到集数的映射，含情绪曲线设计和悬念钩子生成。"
           />
         );
       case "write":
@@ -403,16 +403,16 @@ export default function PhasePanels() {
         return (
           <PlaceholderPanel
             icon={CheckSquare}
-            title="Review Center"
-            description="Multi-dimension review: business logic scoring, compliance check, and reference script comparison."
+            title="审核中心"
+            description="多维度审核：业务逻辑评分、合规检查和参考剧本对比。"
           />
         );
       case "storyboard":
         return (
           <PlaceholderPanel
             icon={FilmStrip}
-            title="Storyboard Preview"
-            description="Cinematic shot planning with dual-track support: traditional Film Storyboard and Seedance AI."
+            title="分镜预览"
+            description="电影级镜头规划，双轨支持：传统Film分镜和Seedance AI。"
           />
         );
       case "export":
@@ -427,11 +427,10 @@ export default function PhasePanels() {
       <div className="max-w-[1400px] mx-auto">
         <div className="mb-10">
           <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-[#f4f4f5]">
-            Phase Details
+            阶段详情
           </h2>
           <p className="mt-3 text-sm text-[#a1a1aa] max-w-[65ch]">
-            Dive into each pipeline phase. Edit scripts, review analysis, and
-            manage outputs.
+            深入每个管线阶段。编辑剧本、查看分析、管理产出。
           </p>
         </div>
 
