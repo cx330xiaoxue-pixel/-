@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* ── Design Tokens: Dark Cinematic ── */
+:root {
+  --accent: #d4a853;
+  --accent-glow: rgba(212, 168, 83, 0.18);
+  --surface: #09090b;
+  --surface-raised: #111114;
+  --surface-card: #18181b;
+  --surface-input: #141416;
+  --border: #27272a;
+  --border-hover: #3f3f46;
+  --border-subtle: #1f1f23;
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --success: #22c55e;
+  --warning: #d4a853;
+  --danger: #ef4444;
+  --info: #3b82f6;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--surface);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* Selection */
+::selection { background: var(--accent-glow); color: var(--accent); }
+
+/* Grain overlay - taste skill Section 6.E */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+/* Phase status indicators */
+.phase-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.phase-dot-done { background: var(--success); }
+.phase-dot-active { background: var(--accent); animation: pulse-dot 2s infinite; }
+.phase-dot-idle { background: var(--border-hover); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--accent); }
+  50% { opacity: 0.4; box-shadow: 0 0 12px var(--accent); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Card base */
+.card-surface {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.3s ease;
+}
+.card-surface:hover { border-color: var(--border-hover); }
+
+/* Tab underline */
+.tab-underline {
+  position: relative;
+}
+.tab-underline[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* Code / monospace blocks */
+.code-surface {
+  background: #0d0d0f;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-geist-mono), "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* YAML token colors */
+.yaml-key { color: #6ea8fe; }
+.yaml-val { color: #98c379; }
+.yaml-num { color: #d4a853; }
+.yaml-bool { color: #e06c75; }
+.yaml-comment { color: #71717a; font-style: italic; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+}
