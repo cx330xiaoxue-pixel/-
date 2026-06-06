@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "novel-to-script-pro"
+version = "2.0.0-alpha"
+description = "AI-Powered Novel-to-Script Adaptation Pipeline — Multi-Agent, Multi-Skill, Full Workflow"
+authors = [
+    {name = "Novel-to-Script Pro Team"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Text Processing :: Markup",
+]
+keywords = ["screenplay", "novel-adaptation", "ai", "storyboard", "yaml", "pipeline"]
+
+[project.scripts]
+n2s = "main:main"
+n2s-ui = "app:main"
+
+[project.urls]
+Homepage = "https://github.com/novel-to-script/pro"
+Documentation = "https://github.com/novel-to-script/pro/wiki"
+
+[tool.setuptools]
+packages = [
+    "engine",
+    "agents",
+    "skills",
+    "extractors",
+    "builders",
+    "ui",
+    "scripts",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
