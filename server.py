@@ -14,8 +14,9 @@ from datetime import datetime
 from typing import Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Add project root to path
@@ -24,6 +25,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.pipeline import Pipeline, create_pipeline
+
+# ── Load env vars ──
+try:
+    from dotenv import load_dotenv
+    _env_file = PROJECT_ROOT / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file)
+    else:
+        load_dotenv()  # try default
+except ImportError:
+    pass
 
 # ── App ──
 app = FastAPI(
@@ -47,6 +59,20 @@ if CONFIG_PATH.exists():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+# Override config with env vars
+for _key, _env_var in [
+    ("llm.api_key", "LLM_API_KEY"),
+    ("llm.base_url", "LLM_BASE_URL"),
+    ("llm.model", "LLM_MODEL"),
+    ("llm_light.api_key", "LLM_LIGHT_API_KEY"),
+    ("llm_light.base_url", "LLM_LIGHT_BASE_URL"),
+    ("llm_light.model", "LLM_LIGHT_MODEL"),
+]:
+    _val = os.getenv(_env_var, "")
+    if _val and _val != "sk-YOUR-API-KEY":
+        _section, _k = _key.split(".")
+        config.setdefault(_section, {})[_k] = _val
+
 OUTPUT_DIR = config.get("output", {}).get("output_dir", "./output")
 
 # ── Pipeline cache (one per project) ──
@@ -57,15 +83,56 @@ _lock = threading.Lock()
 _tasks: dict[str, dict] = {}
 _task_counter = 0
 
+# ── Agent factory (lazy, created once) ──
+_agents_cache: Optional[dict] = None
+
+def _has_valid_api_key() -> bool:
+    """Check if a valid API key is configured."""
+    key = config.get("llm", {}).get("api_key", "")
+    return bool(key) and key != "sk-YOUR-API-KEY" and len(key) > 10
+
+def _create_agents() -> dict:
+    """Create all pipeline agent instances."""
+    global _agents_cache
+    if _agents_cache is not None:
+        return _agents_cache
+
+    from agents import (
+        create_knowledge_curator,
+        create_novel_analyzer,
+        create_insight_architect,
+        create_episode_architect,
+        create_emotion_architect,
+        create_script_writer,
+        create_review_director,
+        create_continuity_recorder,
+        create_storyboard_director,
+    )
+
+    _agents_cache = {
+        "knowledge-curator": create_knowledge_curator(config=config),
+        "novel-analyzer": create_novel_analyzer(config=config),
+        "insight-architect": create_insight_architect(config=config),
+        "episode-architect": create_episode_architect(config=config),
+        "emotion-architect": create_emotion_architect(config=config),
+        "script-writer": create_script_writer(config=config),
+        "review-director": create_review_director(config=config),
+        "continuity-recorder": create_continuity_recorder(config=config),
+        "storyboard-director": create_storyboard_director(config=config),
+    }
+    return _agents_cache
+
 
 def _get_pipeline(project_name: str) -> Pipeline:
     """Get or create a pipeline for a project."""
     with _lock:
         if project_name not in _pipelines:
+            agents = _create_agents() if _has_valid_api_key() else {}
             _pipelines[project_name] = create_pipeline(
                 project_name=project_name,
                 output_dir=OUTPUT_DIR,
-                config_path=str(CONFIG_PATH),
+                config_path=config,  # 传 dict（含内存中的 API key）
+                agents=agents,
             )
         return _pipelines[project_name]
 
@@ -74,7 +141,10 @@ def _run_phase_task(task_id: str, project_name: str, phase: str, **kwargs):
     """Background: run a pipeline phase and store result."""
     try:
         pipeline = _get_pipeline(project_name)
-        result = pipeline._run_phase(phase, **kwargs)
+        if phase == "generate_images":
+            result = pipeline.generate_image_prompts(**kwargs)
+        else:
+            result = pipeline._run_phase(phase, **kwargs)
         _tasks[task_id] = {"status": "completed", "result": result}
     except Exception as e:
         _tasks[task_id] = {"status": "failed", "error": str(e)}
@@ -157,6 +227,33 @@ def create_project(body: ProjectCreate):
     }
 
 
+@app.post("/api/projects/{project_name}/upload")
+async def upload_files(project_name: str, files: list[UploadFile] = File(...)):
+    """Upload .txt novel chapter files for a project."""
+    upload_dir = PROJECT_ROOT / "uploads" / project_name
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for f in files:
+        if f.filename and f.filename.endswith(".txt"):
+            content = await f.read()
+            filepath = upload_dir / f.filename
+            with open(filepath, "wb") as out:
+                out.write(content)
+            saved += 1
+
+    return {"status": "ok", "files_saved": saved, "upload_dir": str(upload_dir)}
+
+
+@app.get("/api/projects/{project_name}/download/{file_path:path}")
+def download_file(project_name: str, file_path: str):
+    """Download a generated output file."""
+    full_path = PROJECT_ROOT / OUTPUT_DIR / project_name / file_path
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(full_path))
+
+
 @app.get("/api/projects/{project_name}/status")
 def get_project_status(project_name: str):
     """Get full progress report for a project."""
@@ -230,6 +327,15 @@ def run_storyboard(project_name: str, episode: int, body: StoryboardRequest, bg:
     return {"task_id": task_id, "status": "started"}
 
 
+@app.post("/api/projects/{project_name}/generate-images/{episode}")
+def run_generate_images(project_name: str, episode: int, bg: BackgroundTasks):
+    """Generate image prompts (& actual images if API key configured) from storyboard."""
+    task_id = f"{project_name}-images-{episode}-{datetime.now().timestamp()}"
+    _tasks[task_id] = {"status": "running"}
+    bg.add_task(_run_phase_task, task_id, project_name, "generate_images", episode=episode)
+    return {"task_id": task_id, "status": "started"}
+
+
 @app.post("/api/projects/{project_name}/final-check")
 def run_final_check(project_name: str, bg: BackgroundTasks):
     """Phase 6: Final validation."""
@@ -292,12 +398,12 @@ def get_report(project_name: str, report_type: str):
         "analysis": report_dir / "analysis" / "analysis-report.md",
         "insight": report_dir / "analysis" / "insight-report.md",
         "plan": report_dir / "planning" / "episode-plan.md",
-        "emotion": report_dir / "planning" / "emotion-curve.md",
+        "emotion": report_dir / "planning" / "emotion-curve.json",
         "final": report_dir / "final-check-report.md",
     }
     if report_type.startswith("review-"):
         ep = report_type.split("-")[1]
-        type_to_path[report_type] = report_dir / "review" / f"review-ep{ep}.md"
+        type_to_path[report_type] = report_dir / "review" / f"review-ep{int(ep):02d}.md"
 
     path = type_to_path.get(report_type)
     if not path:
@@ -309,6 +415,40 @@ def get_report(project_name: str, report_type: str):
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     return {"type": report_type, "content": content, "path": str(path)}
+
+
+@app.get("/api/projects/{project_name}/images/{episode}")
+def list_images(project_name: str, episode: int):
+    """List generated images for an episode."""
+    img_dir = PROJECT_ROOT / OUTPUT_DIR / project_name / "images" / f"ep{episode:02d}"
+    if not img_dir.exists():
+        return {"images": [], "prompts": []}
+
+    images = []
+    prompts = []
+    for f in sorted(img_dir.iterdir()):
+        if f.suffix in (".png", ".jpg", ".jpeg", ".webp"):
+            images.append({
+                "name": f.name,
+                "url": f"/api/projects/{project_name}/images/{episode}/{f.name}",
+                "size": f.stat().st_size,
+            })
+        elif f.name == "image_prompts.json":
+            try:
+                with open(f, "r", encoding="utf-8") as pf:
+                    prompts = json.load(pf).get("prompts", [])[:5]
+            except Exception:
+                pass
+    return {"images": images, "prompts": prompts}
+
+
+@app.get("/api/projects/{project_name}/images/{episode}/{filename}")
+def serve_image(project_name: str, episode: int, filename: str):
+    """Serve a generated image file."""
+    img_path = PROJECT_ROOT / OUTPUT_DIR / project_name / "images" / f"ep{episode:02d}" / filename
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(str(img_path))
 
 
 @app.get("/api/projects/{project_name}/files")
@@ -338,10 +478,39 @@ def list_output_files(project_name: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "api_key_configured": _has_valid_api_key(),
+        "agents_loaded": _agents_cache is not None,
+        "llm_provider": config.get("llm", {}).get("provider", "unknown"),
+        "llm_model": config.get("llm", {}).get("model", "unknown"),
+    }
+
+
+class ConfigUpdate(BaseModel):
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+@app.post("/api/config")
+def update_config(body: ConfigUpdate):
+    """Update LLM config at runtime (api_key, base_url, model)."""
+    global _agents_cache, _pipelines
+    if body.api_key and body.api_key != "sk-YOUR-API-KEY":
+        config.setdefault("llm", {})["api_key"] = body.api_key
+    if body.base_url:
+        config.setdefault("llm", {})["base_url"] = body.base_url
+    if body.model:
+        config.setdefault("llm", {})["model"] = body.model
+    # Invalidate agent cache so they get recreated with new config
+    _agents_cache = None
+    _pipelines.clear()
+    return {"status": "ok", "api_key_configured": _has_valid_api_key()}
 
 
 # ── Entry ──
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

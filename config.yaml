@@ -20,29 +20,30 @@ llm_light:
   temperature: 0.3
   max_tokens: 2048
 
-# ── 图片生成 API 配置 ──
+# ── 图片生成 API 配置（Doubao Seedream 5.0）──
 image_gen:
-  provider: "nano_banana"            # nano_banana | skyreels | openai | custom
-  api_key: ""
-  base_url: ""
-  model: "gemini-3.1-flash-image-preview"
-  default_size: "1024x1024"
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedream-5-0-260128"
+  default_size: "2K"
   default_quality: "high"
 
 # ── 图片反推 API 配置 ──
 image_reverse:
-  provider: "nano_banana"
-  api_key: ""
-  base_url: ""
-  model: "gemini-3.1-pro-preview"
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedream-5-0-260128"
 
-# ── 视频生成 API 配置（SkyReels / Seedance）──
+# ── 视频生成 API 配置（Doubao Seedance 1.5 Pro）──
 video_gen:
-  provider: "skyreels"
-  api_key: ""
-  base_url: ""
-  submit_url: ""
-  task_url: ""
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  submit_url: "https://ark.cn-beijing.volces.com/api/v3/video/generations"
+  task_url: "https://ark.cn-beijing.volces.com/api/v3/video/generations"
+  model: "doubao-seedance-1-5-pro"
 
 # ── 文本处理配置 ──
 processing:
