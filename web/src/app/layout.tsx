@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Novel-to-Script Pro - AI-Powered Adaptation Pipeline",
+  title: "Novel-to-Script Pro - AI驱动的改编管线",
   description:
-    "Transform novels into production-ready scripts with AI agents. Six-phase pipeline from ingestion to storyboard.",
+    "使用AI Agent将小说转化为专业剧本。六阶段管线，覆盖从原文导入到电影级分镜的完整流程。",
 };
 
 export default function RootLayout({

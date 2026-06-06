@@ -1,5 +1,5 @@
 const PHASE_LABELS = [
-  "Ingest", "Analyze", "Plan", "Write", "Review", "Storyboard",
+  "导入", "分析", "规划", "编写", "审核", "分镜",
 ];
 
 export default function Hero() {
@@ -20,20 +20,20 @@ export default function Hero() {
       <div className="relative z-10 max-w-[720px] mx-auto text-center">
         {/* Eyebrow */}
         <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#d4a853] mb-6">
-          AI-Powered Adaptation Pipeline
+          AI驱动的改编管线
         </p>
 
         {/* Headline */}
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-semibold tracking-tighter leading-[1.05] text-[#f4f4f5]">
-          Novel to Script,
+          从小说到剧本，
           <br />
-          <span className="text-[#d4a853]">Amplified by AI</span>
+          <span className="text-[#d4a853]">AI赋能创作</span>
         </h1>
 
         {/* Subtext */}
         <p className="mt-6 text-base md:text-lg text-[#a1a1aa] leading-relaxed max-w-[540px] mx-auto">
-          Six-phase pipeline transforms raw novels into production-ready scripts
-          with character analysis, scene breakdown, and cinematic storyboarding.
+          六阶段管线将原始小说转化为专业剧本，
+          涵盖角色分析、场景拆解和电影级分镜设计。
         </p>
 
         {/* Pipeline flow strip */}

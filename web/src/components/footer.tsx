@@ -17,15 +17,15 @@ export default function Footer() {
 
         {/* Links */}
         <div className="flex items-center gap-6 text-[13px] text-[var(--text-muted)]">
-          <span>Pipeline: 6 phases</span>
-          <span>Agents: 13</span>
-          <span>Skills: 16</span>
+          <span>管线: 6阶段</span>
+          <span>Agent: 13个</span>
+          <span>技能: 16个</span>
           <span>Schema: v2.0</span>
         </div>
 
         {/* Copyright */}
         <p className="text-[12px] text-[var(--text-muted)]">
-          Built for screenwriters and content creators
+          为编剧和内容创作者打造
         </p>
       </div>
     </footer>
