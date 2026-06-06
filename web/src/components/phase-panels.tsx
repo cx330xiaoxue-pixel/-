@@ -137,7 +137,7 @@ function ScriptPanel() {
                 : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"
             }`}
           >
-            Ep {ep.toString().padStart(2, "0")}
+            第{ep.toString().padStart(2, "0")}集
           </button>
         ))}
       </div>
@@ -430,7 +430,7 @@ export default function PhasePanels() {
             阶段详情
           </h2>
           <p className="mt-3 text-sm text-[#a1a1aa] max-w-[65ch]">
-            深入每个管线阶段。编辑剧本、查看分析、管理产出。
+            {'深入每个管线阶段。编辑剧本、查看分析、管理产出。'}
           </p>
         </div>
 

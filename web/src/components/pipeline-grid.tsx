@@ -192,8 +192,7 @@ export default function PipelineGrid() {
             管线状态
           </h2>
           <p className="mt-3 text-[#a1a1aa] text-sm max-w-[65ch]">
-            六阶段管线，从源材料导入到电影级分镜。
-            每个阶段由专门的AI Agent负责执行。
+            {'六阶段管线，从源材料导入到电影级分镜。每个阶段由专门的AI Agent负责执行。'}
           </p>
 
           {/* Project selector + controls */}

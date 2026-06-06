@@ -19,7 +19,7 @@ export default function Hero() {
 
       <div className="relative z-10 max-w-[720px] mx-auto text-center">
         {/* Eyebrow */}
-        <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#d4a853] mb-6">
+        <p className="text-[11px] font-mono tracking-[0.1em] text-[#d4a853] mb-6">
           AI驱动的改编管线
         </p>
 
@@ -32,8 +32,7 @@ export default function Hero() {
 
         {/* Subtext */}
         <p className="mt-6 text-base md:text-lg text-[#a1a1aa] leading-relaxed max-w-[540px] mx-auto">
-          六阶段管线将原始小说转化为专业剧本，
-          涵盖角色分析、场景拆解和电影级分镜设计。
+          {'六阶段管线将原始小说转化为专业剧本，涵盖角色分析、场景拆解和电影级分镜设计。'}
         </p>
 
         {/* Pipeline flow strip */}
