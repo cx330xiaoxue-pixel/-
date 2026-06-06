@@ -122,6 +122,77 @@ function ScriptPanel({ projectName }: { projectName: string }) {
   const sceneCount = script?.content ? (script.content.match(/scene_id/g) || []).length : 0;
   const elemCount = script?.content ? (script.content.match(/element_id/g) || []).length : 0;
 
+  // YAML → 纯文本剧本
+  const handleDownloadTxt = () => {
+    if (!script?.content) return;
+    const lines: string[] = [];
+    const content = script.content;
+
+    // 用正则从 YAML 中提取章节和场景信息
+    const chapterMatch = content.match(/chapters:/);
+    if (!chapterMatch) { downloadFile(content, `ep${episode.toString().padStart(2, "0")}_script.txt`, "text/plain"); return; }
+
+    // 提取标题
+    const titleMatch = content.match(/script_title:\s*(.+)/);
+    const title = titleMatch ? titleMatch[1] : `第${episode}集`;
+
+    lines.push(title);
+    lines.push("=".repeat(50));
+    lines.push("");
+
+    // 按场景分割
+    const sceneBlocks = content.split(/(?=  - scene_id:)/);
+    for (const block of sceneBlocks) {
+      if (!block.includes("scene_id:")) continue;
+
+      const locMatch = block.match(/location:\s*(.+)/);
+      const timeMatch = block.match(/time:\s*(.+)/);
+      const atmMatch = block.match(/atmosphere:\s*(.+)/);
+      const sceneNum = block.match(/scene_number:\s*(\d+)/);
+
+      const location = locMatch ? locMatch[1].trim() : "未知";
+      const time = timeMatch ? timeMatch[1].trim() : "";
+      const atmosphere = atmMatch ? atmMatch[1].trim() : "";
+
+      lines.push(`【场景${sceneNum ? sceneNum[1] : "?"}】${location}${time ? " · " + time : ""}${atmosphere ? " · " + atmosphere : ""}`);
+      lines.push("");
+
+      // 提取元素
+      const elemBlocks = block.split(/(?=  - element_id:)/);
+      for (const eb of elemBlocks) {
+        if (!eb.includes("element_id:")) continue;
+        const typeMatch = eb.match(/type:\s*(.+)/);
+        const roleMatch = eb.match(/role:\s*(.+)/);
+        const textMatch = eb.match(/text:\s*(.+)/);
+        const emotionMatch = eb.match(/emotion:\s*(.+)/);
+        const actionMatch = eb.match(/action:\s*(.+)/);
+        const subtextMatch = eb.match(/subtext:\s*(.+)/);
+
+        const type = typeMatch ? typeMatch[1].trim() : "";
+        const role = roleMatch ? roleMatch[1].trim() : "";
+        const text = textMatch ? textMatch[1].trim() : "";
+        const emotion = emotionMatch ? emotionMatch[1].trim() : "";
+        const action = actionMatch ? actionMatch[1].trim() : "";
+        const subtext = subtextMatch ? subtextMatch[1].trim() : "";
+
+        if (type === "dialogue" && role !== "旁白") {
+          const emot = emotion ? `（${emotion}）` : "";
+          lines.push(`  ${role}${emot}：${text}`);
+        } else if (type === "action") {
+          const actText = action || text;
+          lines.push(`  [${actText}]`);
+        } else if (type === "narration" || type === "description") {
+          lines.push(`  ${text}`);
+        } else if (text) {
+          lines.push(`  ${text}`);
+        }
+      }
+      lines.push("");
+    }
+
+    downloadFile(lines.join("\n"), `ep${episode.toString().padStart(2, "0")}_剧本.txt`, "text/plain;charset=utf-8");
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center gap-3 flex-wrap">
@@ -133,8 +204,11 @@ function ScriptPanel({ projectName }: { projectName: string }) {
           </button>
         ))}
         <div className="ml-auto flex gap-2">
-          <button onClick={() => script?.content && downloadFile(script.content, `ep${episode.toString().padStart(2, "0")}_script.yaml`)} disabled={!script?.content}
+          <button onClick={handleDownloadTxt} disabled={!script?.content}
             className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <FileText size={14} /> 下载 TXT</button>
+          <button onClick={() => script?.content && downloadFile(script.content, `ep${episode.toString().padStart(2, "0")}_script.yaml`)} disabled={!script?.content}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-all disabled:opacity-30 disabled:cursor-not-allowed">
             <Download size={14} /> 下载 YAML</button>
         </div>
       </div>
