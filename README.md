@@ -1,70 +1,36 @@
 # Novel-to-Script Pro
 
-> 🎬 小说 → 剧本 → 分镜，AI 驱动的全流程智能改编系统
+> 🎬 小说 → 剧本 → 分镜 → 生图，AI 驱动的全流程智能改编系统
 
-**Novel-to-Script Pro** 是一款面向小说作者的 AI 辅助剧本创作工具。输入 3 章以上的小说文本，自动生成结构化的 YAML 剧本初稿 —— 可编辑、可打磨、可直接进入拍摄筹备。
+**Novel-to-Script Pro** 是一款 AI 辅助剧本创作工具。上传小说 TXT 章节，自动生成结构化 YAML 剧本、审核报告、分镜序列板和 AI 图片。
 
 ---
 
 ## ✨ 核心特性
 
-- **📖 智能抽取** — 滑窗并行 + LLM 深度抽取，精准识别对话、动作、描写、潜台词、节拍类型
-- **🔗 6 阶段管线** — 知识收编 → 改编分析 → 分集规划 → 逐集写剧本 → 多维度审核 → 分镜可视化，全流程自动化
-- **🤖 多 Agent 协作** — 14 个专职 Agent 角色，各司其职（剧本分析、情绪曲线、分镜设计、合规审核…）
-- **🎨 双轨分镜** — 同时支持传统 Film Storyboard 和 Seedance AI 视频流分镜
-- **🔄 审核闭环** — 业务审核 + 合规检查 + 风格对比 + Show Don't Tell 视觉化验证，自动回改
-- **📐 YAML Schema v2** — 结构化剧本格式，人机共读，支持角色关系图、情绪曲线、版本对比
-- **🖥️ Web UI** — Next.js 前端 + FastAPI 后端，可视化操作全流程
-- **🔌 多 Provider 可替换** — LLM（DeepSeek/OpenAI/任意兼容）、图片生成、视频生成均可配置切换
+- **📖 LLM 智能抽取** — 滑窗并行 + DeepSeek LLM 深度抽取，精准识别对话、动作、描写、情绪
+- **🔗 7 阶段管线** — 导入 → 分析 → 规划 → 写剧本 → 审核 → 分镜 → 生图，全流程自动化
+- **🤖 9 Agent 协作** — 专职 Agent 角色（剧本分析、分集规划、情绪曲线、多维度审核、分镜设计）
+- **🔄 审核闭环** — 业务评分（情节/人物/对白/节奏/视觉/情感/悬念）+ 合规检查 + AI 评审意见
+- **🎥 分镜序列板** — 从剧本自动解析场景 → 镜头 → 节拍，生成 Camera Map + Motion Prompts
+- **🖼️ AI 生图** — 集成 Doubao Seedream 5.0，从分镜数据自动生成分镜图
+- **🖥️ Web UI** — Next.js 前端 + FastAPI 后端，可视化操作全流程 + 实时进度
+- **🔌 多 Provider** — LLM（DeepSeek）、图片生成（Doubao/OpenAI 兼容）可配置切换
 
 ---
 
-## 🏗️ 6 阶段管线
+## 🏗️ 管线流程
 
 ```
-Phase 0: 知识收编    →  导入原文，术语注册，建立知识索引
-Phase 1: 改编分析    →  主题洞察、人物弧光、世界规则分析
-Phase 2: 分集规划    →  章节→集映射、情绪曲线、悬念设计
-Phase 3: 逐集写剧本  →  AI 生成 YAML 剧本（含爆款参考、Show Don't Tell）
-Phase 4: 多维度审核  →  业务 + 合规 + 对比 + 风格，不通过则自动回改
-Phase 5: 分镜可视化  →  双轨分镜（Film Storyboard + Seedance）
-Phase 6: 完成检查    →  乱码检测、一致性校验、完整性验证
+Phase 0: 导入        →  扫描 TXT 章节，建立源材料索引
+Phase 1: 分析        →  LLM 分析叙事结构、角色网络、改编潜力（含综合评分）
+Phase 2: 规划        →  章节→集映射、情绪曲线设计、悬念钩子
+Phase 3: 写剧本      →  LLM 滑窗抽取 → 结构化 YAML 剧本（对白/动作/情绪/潜台词）
+Phase 4: 审核        →  LLM 多维度审核（业务 7 维度评分 + 合规检查 + AI 评审意见）
+Phase 5: 分镜        →  剧本解析 → 场景/镜头/节拍 → Sequence Board + Motion Prompts
+Phase 6: 生图        →  分镜数据 → 图片提示词 → AI 生成分镜图（可选）
+Phase 7: 完成检查    →  乱码检测、一致性校验、完整性验证
 ```
-
----
-
-## 🎭 Agent 角色
-
-| Agent | 职责 |
-|-------|------|
-| `knowledge-curator` | 原文知识管理、术语注册 |
-| `novel-analyzer` | 小说深度分析（人物、结构、类型） |
-| `insight-architect` | 主题洞察与改编策略 |
-| `episode-architect` | 分集规划与结构设计 |
-| `emotion-architect` | 情绪曲线设计与观众心理管理 |
-| `script-writer` | 单集剧本生成（检索 + 参考 + 风格控制） |
-| `visual-storyteller` | Show Don't Tell 视觉化审核 |
-| `script-comparator` | 与参考剧本逐一对比 |
-| `review-director` | 业务审核 + 合规审核 |
-| `continuity-recorder` | 跨集一致性记录 |
-| `storyboard-director` | 分镜指导与审核 |
-| `storyboard-artist` | 分镜图 / Seedance 提示词生成 |
-| `art-designer` | 人物 / 场景服化道设计 |
-| `image-generator` | 文生图 / 图生视频 API 调用 |
-
----
-
-## 🛠️ 技术栈
-
-| 层 | 技术 |
-|----|------|
-| **后端** | Python 3.10+, FastAPI |
-| **前端** | Next.js, TypeScript, Tailwind CSS |
-| **LLM** | OpenAI SDK（兼容 DeepSeek / OpenAI / 任意 OpenAI-compatible API） |
-| **数据格式** | YAML 1.2（Schema v2.0） |
-| **配置** | YAML + .env |
-| **并发** | ThreadPoolExecutor / asyncio |
-| **图片生成** | 可配置 Provider（Nano Banana / SkyReels / OpenAI） |
 
 ---
 
@@ -75,50 +41,65 @@ Phase 6: 完成检查    →  乱码检测、一致性校验、完整性验证
 - Python 3.10+
 - Node.js 18+
 - LLM API Key（DeepSeek 或 OpenAI 兼容）
+- （可选）图片生成 API Key（Doubao Seedream / OpenAI DALL-E）
 
-### 1. 克隆仓库
-
-```bash
-git clone https://github.com/cx330xiaoxue-pixel/-.git
-cd novel-to-script-pro
-```
-
-### 2. 安装 Python 依赖
+### 1. 安装 Python 依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 配置环境变量
+### 2. 配置 API Key
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入你的 API Key
+# 编辑 .env，填入你的 LLM API Key
 ```
 
-编辑 `config.yaml`，选择 LLM Provider 和模型。
+或通过 API 运行时配置：
+```bash
+curl -X POST http://localhost:8000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"sk-你的key","base_url":"https://api.deepseek.com/v1","model":"deepseek-chat"}'
+```
 
-### 4. 启动后端 API
+### 3. 启动后端
 
 ```bash
 python server.py
 # API 运行在 http://localhost:8000
+# API 文档: http://localhost:8000/docs
 ```
 
-### 5. 启动前端（可选）
+### 4. 启动前端
 
 ```bash
 cd web
 npm install
-npm run dev
+npm run build
+npm run start
 # 前端运行在 http://localhost:3000
 ```
 
-### 6. 使用 CLI（无 UI）
+### 5. 使用
 
-```bash
-# 将 sample_novel 目录下的示例小说转换为剧本
-python -m engine.pipeline --source ./sample_novel --output ./output/my_script
+1. 打开 `http://localhost:3000`
+2. 「导入」标签页上传 `.txt` 章节文件
+3. 点「运行管线」
+4. 查看「剧本」「审核」「分镜」「图片」各阶段产出
+
+---
+
+## 🖼️ 图片生成配置
+
+编辑 `config.yaml`：
+```yaml
+image_gen:
+  provider: "ark"        # ark (Doubao) / openai (DALL-E) / custom
+  api_key: "你的图片API Key"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedream-5-0-260128"
+  default_size: "2K"
 ```
 
 ---
@@ -128,19 +109,23 @@ python -m engine.pipeline --source ./sample_novel --output ./output/my_script
 ```
 novel-to-script-pro/
 ├── engine/              # 管线引擎（Pipeline 调度、状态管理、任务队列）
-├── agents/              # 14 个专职 Agent（基类 + 各角色实现）
-├── skills/              # 可复用技能模块（审核、写作、分镜、检索…）
-├── extractors/          # 文本抽取层（LLM 抽取、规则抽取、角色追踪）
-├── builders/            # 剧本构建层（YAML 构建器、Schema v2.0）
-├── knowledge/           # 知识层（爆款剧本参考库、提示词模板）
-├── references/          # 方法论参考（改编系统、分镜方法、故事心理学…）
-├── schema/              # YAML Schema v2.0 定义文档
-├── scripts/             # 工具脚本（检索、文生图、图反推、批处理）
+├── agents/              # 9 个专职 Agent（基类 + 各角色实现）
+├── skills/              # 可复用技能模块（审核、写作、分镜、图片生成）
+├── extractors/          # 文本抽取层（LLM 抽取、规则抽取）
+├── builders/            # 剧本构建层（YAML 构建器）
+├── knowledge/           # 知识层（参考库、提示词模板）
+├── references/          # 方法论参考
+├── schema/              # YAML Schema 定义
 ├── web/                 # Next.js 前端
-├── ui/                  # Streamlit UI 组件（旧版）
-├── tests/               # 单元测试
 ├── sample_novel/        # 示例小说（3 章）
-├── output/              # 输出目录，按剧本名组织
+├── output/              # 输出目录
+│   └── {项目名}/
+│       ├── scripts/         # YAML 剧本
+│       ├── analysis/        # 分析报告
+│       ├── planning/        # 分集规划 + 情绪曲线
+│       ├── review/          # 审核报告
+│       ├── storyboard/      # 分镜序列板 + 运动提示
+│       └── images/          # AI 生成图片 + 提示词
 ├── config.yaml          # 全局配置
 ├── server.py            # FastAPI 入口
 └── requirements.txt     # Python 依赖
@@ -150,28 +135,19 @@ novel-to-script-pro/
 
 ## ⚙️ 配置说明
 
-`config.yaml` 中的关键配置项：
-
 | 配置项 | 说明 |
 |--------|------|
 | `llm.provider` | LLM 提供商：`deepseek` / `openai` / `custom` |
 | `llm.model` | 模型名称 |
+| `image_gen.provider` | 图片生成器：`ark` (Doubao) / `openai` (DALL-E) / `custom` |
+| `image_gen.model` | 图片模型名称 |
 | `processing.window_size` | 滑窗行数（默认 40） |
-| `pipeline.review_passes` | 审核通过最少 PASS 数（默认 2） |
-| `pipeline.max_rewrite_rounds` | 单集最多回改轮次（默认 3） |
-| `pipeline.storyboard_mode` | 分镜模式：`film` / `seedance` |
-| `compliance.target_platform` | 目标平台合规：`generic` / `youku` / `iqiyi` / `tencent` |
+| `pipeline.review_passes` | 审核通过最少 PASS 数 |
+| `pipeline.max_rewrite_rounds` | 单集最多回改轮次 |
+| `compliance.target_platform` | 合规平台：`generic` / `youku` / `iqiyi` / `tencent` |
 
 ---
 
 ## 📄 许可证
 
 MIT License
-
----
-
-## 🙏 致谢
-
-本项目融合了两个来源的核心思想：
-- **novel-to-script-yaml** — 可运行的 Python 抽取 + YAML 构建管线
-- **novel-to-script-team** — 多 Agent 多 Skill 协作架构与 6 阶段流程设计
