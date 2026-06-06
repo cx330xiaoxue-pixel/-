@@ -13,10 +13,16 @@
   python main.py analyze --title "剑影江湖"
   python main.py plan --episodes 40
   python main.py write --episode 1
-  python main.py review --episode 1
-  python main.py storyboard --episode 1 --mode film
-  python main.py auto --input ./sample_novel/ --title "青云之路" --episodes 3
+
+imports below
 """
+import sys
+# Windows 终端默认 GBK 不支持 emoji，强制 UTF-8 输出
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 import os
 import time

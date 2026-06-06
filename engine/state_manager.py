@@ -11,8 +11,16 @@ Agent 状态管理器 — 管线执行状态持久化与恢复
 
 import json
 import os
+import sys
 import time
 from datetime import datetime
+
+# Windows 终端默认 GBK 不支持 emoji，强制 UTF-8 输出
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 from typing import Any, Optional
 
 

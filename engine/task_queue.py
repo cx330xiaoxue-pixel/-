@@ -9,10 +9,18 @@
   - 与 AgentStateManager 集成记录执行日志
 """
 
+import sys
 import threading
 import time
 import traceback
 from collections import defaultdict
+
+# Windows 终端默认 GBK 不支持 emoji，强制 UTF-8 输出
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from dataclasses import dataclass, field
 from enum import Enum
