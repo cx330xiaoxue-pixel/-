@@ -118,3 +118,65 @@ body {
   }
   html { scroll-behavior: auto; }
 }
+
+/* ── Print styles for TXT script content ── */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+    line-height: 1.8;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Serif CJK SC", "SimSun", serif;
+  }
+
+  .grain-overlay,
+  .card-surface,
+  nav,
+  footer,
+  button,
+  .code-surface {
+    background: white !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .script-content {
+    max-height: none !important;
+    overflow: visible !important;
+    font-size: 12pt !important;
+    line-height: 1.8 !important;
+    color: black !important;
+    background: white !important;
+    border: none !important;
+  }
+
+  .script-content > div {
+    page-break-inside: avoid;
+  }
+
+  /* Keep semantic color differentiation in print */
+  .script-content .text-\[\#d4a853\] {
+    color: #333 !important;
+    font-weight: bold !important;
+    border-color: #999 !important;
+  }
+  .script-content .text-\[\#6ea8fe\] {
+    color: #333 !important;
+    font-weight: bold !important;
+  }
+  .script-content .text-\[\#98c379\] {
+    color: #555 !important;
+  }
+  .script-content .text-\[\#e4e4e7\],
+  .script-content .text-\[\#a1a1aa\] {
+    color: #222 !important;
+  }
+  .script-content .text-\[\#71717a\] {
+    color: #666 !important;
+  }
+
+  @page {
+    margin: 2.5cm 2cm;
+    size: A4;
+  }
+}

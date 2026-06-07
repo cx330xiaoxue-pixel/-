@@ -21,6 +21,7 @@ import {
   PencilSimple,
   Spinner,
   Globe,
+  Copy,
 } from "@phosphor-icons/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { easeOutExpo } from "@/lib/motion";
@@ -81,6 +82,248 @@ function downloadFile(content: string, filename: string, mime = "text/yaml") {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/* ── TXT Viewer ── */
+function TxtViewer({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const [activeScene, setActiveScene] = useState<number | null>(null);
+
+  interface TxtLine {
+    type: "h1" | "h2" | "h3" | "dialogue" | "action" | "text" | "empty";
+    text: string;
+    role?: string;
+    emotion?: string;
+    sceneNumber?: number;
+  }
+  const lines: TxtLine[] = [];
+  const sceneNav: { number: number; label: string }[] = [];
+
+  const chapterMatch = content.match(/chapters:/);
+  const titleMatch = content.match(/script_title:\s*(.+)/);
+  const title = titleMatch ? titleMatch[1] : "";
+
+  const sceneBlocks = content.split(/(?=  - scene_id:)/);
+  for (const block of sceneBlocks) {
+    if (!block.includes("scene_id:")) continue;
+
+    const locMatch = block.match(/location:\s*(.+)/);
+    const timeMatch = block.match(/time:\s*(.+)/);
+    const atmMatch = block.match(/atmosphere:\s*(.+)/);
+    const sceneNumMatch = block.match(/scene_number:\s*(\d+)/);
+
+    const location = locMatch ? locMatch[1].trim() : "未知";
+    const time = timeMatch ? timeMatch[1].trim() : "";
+    const atmosphere = atmMatch ? atmMatch[1].trim() : "";
+    const sceneNum = sceneNumMatch ? parseInt(sceneNumMatch[1]) : sceneNav.length + 1;
+
+    sceneNav.push({
+      number: sceneNum,
+      label: `场景${sceneNum} — ${location}`,
+    });
+
+    lines.push({
+      type: "h1",
+      text: `【场景${sceneNum}】${location}${time ? " · " + time : ""}${atmosphere ? " · " + atmosphere : ""}`,
+      sceneNumber: sceneNum,
+    });
+    lines.push({ type: "empty", text: "" });
+
+    const elemBlocks = block.split(/(?=  - element_id:)/);
+    for (const eb of elemBlocks) {
+      if (!eb.includes("element_id:")) continue;
+      const typeMatch = eb.match(/type:\s*(.+)/);
+      const roleMatch = eb.match(/role:\s*(.+)/);
+      const textMatch = eb.match(/text:\s*(.+)/);
+      const emotionMatch = eb.match(/emotion:\s*(.+)/);
+      const actionMatch = eb.match(/action:\s*(.+)/);
+
+      const type = typeMatch ? typeMatch[1].trim() : "";
+      const role = roleMatch ? roleMatch[1].trim() : "";
+      const text = textMatch ? textMatch[1].trim() : "";
+      const emotion = emotionMatch ? emotionMatch[1].trim() : "";
+      const action = actionMatch ? actionMatch[1].trim() : "";
+
+      if (type === "dialogue" && role !== "旁白") {
+        lines.push({ type: "dialogue", text, role, emotion });
+      } else if (type === "narration" || type === "description") {
+        lines.push({ type: "text", text });
+      } else if (type === "action") {
+        const actText = action || text;
+        lines.push({ type: "action", text: actText });
+      } else if (text) {
+        lines.push({ type: "text", text });
+      }
+    }
+    lines.push({ type: "empty", text: "" });
+  }
+
+  // Build plain text for clipboard
+  const plainText = lines
+    .map((l) => {
+      switch (l.type) {
+        case "h1":
+          return `\n${l.text}\n`;
+        case "dialogue":
+          return `  ${l.role}${l.emotion ? `（${l.emotion}）` : ""}：${l.text}`;
+        case "action":
+          return `  [${l.text}]`;
+        case "text":
+          return `  ${l.text}`;
+        case "empty":
+          return "";
+        default:
+          return l.text;
+      }
+    })
+    .join("\n");
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(plainText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      const ta = document.createElement("textarea");
+      ta.value = plainText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const scrollToScene = (sceneNumber: number) => {
+    setActiveScene(sceneNumber);
+    const el = document.getElementById(`scene-${sceneNumber}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  if (lines.length === 0) {
+    return (
+      <pre className="code-surface p-5 text-[13px] text-[#a1a1aa] leading-[1.7]">
+        {content || "暂无剧本数据"}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="flex gap-4 items-start">
+      {/* Scene navigation sidebar */}
+      {sceneNav.length > 1 && (
+        <nav className="hidden xl:block shrink-0 w-[170px] sticky top-20 max-h-[60vh] overflow-y-auto card-surface p-3">
+          <h4 className="text-[11px] font-mono text-[#71717a] mb-2 tracking-wider">
+            场景导航
+          </h4>
+          <ul className="space-y-0.5">
+            {sceneNav.map((s) => (
+              <li key={s.number}>
+                <button
+                  onClick={() => scrollToScene(s.number)}
+                  className={`w-full text-left text-[12px] px-2 py-1.5 rounded-md transition-all truncate ${
+                    activeScene === s.number
+                      ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/20"
+                      : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#18181b]"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+
+      {/* Main TXT content */}
+      <div className="flex-1 min-w-0">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between mb-3">
+          {title && (
+            <h3 className="text-lg font-semibold text-[#f4f4f5]">
+              {title}
+            </h3>
+          )}
+          <motion.button
+            onClick={handleCopy}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-lg transition-all ${
+              copied
+                ? "bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/30"
+                : "border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:border-[#3f3f46]"
+            }`}
+          >
+            {copied ? (
+              <>✅ 已复制</>
+            ) : (
+              <>
+                <Copy size={14} /> 复制剧本
+              </>
+            )}
+          </motion.button>
+        </div>
+
+        {/* TXT content with print-friendly class */}
+        <div
+          className="code-surface p-6 overflow-x-auto text-[14px] leading-[1.9] max-h-[65vh] overflow-y-auto script-content"
+          id="script-content"
+        >
+          {lines.map((line, i) => {
+            switch (line.type) {
+              case "h1":
+                return (
+                  <div
+                    key={i}
+                    id={`scene-${line.sceneNumber}`}
+                    className="text-[#d4a853] font-semibold text-[15px] mt-5 mb-2 border-b border-[#27272a] pb-1.5"
+                  >
+                    {line.text}
+                  </div>
+                );
+              case "dialogue":
+                return (
+                  <div key={i} className="flex gap-2 ml-4 my-1.5">
+                    <span className="text-[#6ea8fe] font-medium shrink-0">
+                      {line.role}
+                      {line.emotion ? (
+                        <span className="text-[#71717a] font-normal ml-1">
+                          （{line.emotion}）
+                        </span>
+                      ) : (
+                        ""
+                      )}
+                      ：
+                    </span>
+                    <span className="text-[#e4e4e7]">{line.text}</span>
+                  </div>
+                );
+              case "action":
+                return (
+                  <div key={i} className="text-[#98c379] ml-2 my-1">
+                    ［{line.text}］
+                  </div>
+                );
+              case "text":
+                return (
+                  <div key={i} className="text-[#a1a1aa] ml-2 my-1">
+                    {line.text}
+                  </div>
+                );
+              case "empty":
+                return <div key={i} className="h-3" />;
+              default:
+                return null;
+            }
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ── YAML Viewer ── */
@@ -438,7 +681,7 @@ function IngestPanel({ projectName }: { projectName: string }) {
 /* ── Script Panel ── */
 function ScriptPanel({ projectName }: { projectName: string }) {
   const [episode, setEpisode] = useState(1);
-  const [view, setView] = useState<"yaml" | "preview">("yaml");
+  const [view, setView] = useState<"yaml" | "txt" | "preview">("yaml");
   const [script, setScript] = useState<ScriptData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -666,22 +909,32 @@ function ScriptPanel({ projectName }: { projectName: string }) {
 
       {/* View toggle */}
       <div className="flex items-center gap-1 p-1 bg-[#18181b] border border-[#27272a] rounded-lg w-fit">
-        {(["yaml", "preview"] as const).map((v) => (
-          <motion.button
-            key={v}
-            onClick={() => setView(v)}
-            whileHover={view !== v ? { scale: 1.04 } : {}}
-            whileTap={{ scale: 0.96 }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${
-              view === v
-                ? "bg-[#09090b] text-[#d4a853]"
-                : "text-[#71717a] hover:text-[#a1a1aa]"
-            }`}
-          >
-            {v === "yaml" ? <Code size={14} /> : <Eye size={14} />}
-            {v === "yaml" ? "YAML" : "预览"}
-          </motion.button>
-        ))}
+        {(["yaml", "txt", "preview"] as const).map((v) => {
+          const icon =
+            v === "yaml" ? <Code size={14} /> :
+            v === "txt" ? <FileText size={14} /> :
+            <Eye size={14} />;
+          const label =
+            v === "yaml" ? "YAML" :
+            v === "txt" ? "TXT" :
+            "预览";
+          return (
+            <motion.button
+              key={v}
+              onClick={() => setView(v)}
+              whileHover={view !== v ? { scale: 1.04 } : {}}
+              whileTap={{ scale: 0.96 }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${
+                view === v
+                  ? "bg-[#09090b] text-[#d4a853]"
+                  : "text-[#71717a] hover:text-[#a1a1aa]"
+              }`}
+            >
+              {icon}
+              {label}
+            </motion.button>
+          );
+        })}
       </div>
 
       {/* Grading stats bar */}
@@ -794,6 +1047,16 @@ function ScriptPanel({ projectName }: { projectName: string }) {
             <YamlViewer
               content={script?.content || "# 暂无数据"}
             />
+          </motion.div>
+        ) : view === "txt" ? (
+          <motion.div
+            key={`txt-${episode}`}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.3 }}
+          >
+            <TxtViewer content={script?.content || "# 暂无数据"} />
           </motion.div>
         ) : (
           <motion.div
