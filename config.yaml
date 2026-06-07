@@ -20,29 +20,30 @@ llm_light:
   temperature: 0.3
   max_tokens: 2048
 
-# ── 图片生成 API 配置 ──
+# ── 图片生成 API 配置（Doubao Seedream 5.0）──
 image_gen:
-  provider: "nano_banana"            # nano_banana | skyreels | openai | custom
-  api_key: ""
-  base_url: ""
-  model: "gemini-3.1-flash-image-preview"
-  default_size: "1024x1024"
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedream-5-0-260128"
+  default_size: "2K"
   default_quality: "high"
 
 # ── 图片反推 API 配置 ──
 image_reverse:
-  provider: "nano_banana"
-  api_key: ""
-  base_url: ""
-  model: "gemini-3.1-pro-preview"
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedream-5-0-260128"
 
-# ── 视频生成 API 配置（SkyReels / Seedance）──
+# ── 视频生成 API 配置（Doubao Seedance 1.5 Pro）──
 video_gen:
-  provider: "skyreels"
-  api_key: ""
-  base_url: ""
-  submit_url: ""
-  task_url: ""
+  provider: "ark"
+  api_key: "ark-47451241-920f-432c-b2e3-481781e9ce34-8c5f3"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  submit_url: "https://ark.cn-beijing.volces.com/api/v3/video/generations"
+  task_url: "https://ark.cn-beijing.volces.com/api/v3/video/generations"
+  model: "doubao-seedance-1-5-pro"
 
 # ── 文本处理配置 ──
 processing:
@@ -77,6 +78,27 @@ compliance:
   enable_platform_check: true       # 是否启用平台规范检查
   custom_blacklist: []              # 自定义禁用词列表
   target_platform: "generic"        # 目标平台: generic | youku | iqiyi | tencent | bilibili
+
+# ── 内容分级配置 ──
+content_grading:
+  enabled: true                    # 是否启用内容分级
+  mode: "balanced"                 # strict(忠于原著) | balanced(默认) | loose(适配影视节奏)
+  s_level_threshold: 0.6           # S级置信度阈值 (0-1)
+  a_level_threshold: 0.35          # A级置信度阈值 (0-1)
+  max_merged_narration_chars: 50   # B级合并旁白最大字数
+  llm_borderline_review: true      # 是否LLM复核边界案例
+  repetition_similarity: 0.6       # 重复检测相似度阈值
+
+# ── 智能分集配置 ──
+episode_rhythm:
+  enabled: true                    # 是否启用智能分集
+  target_format: "long_drama"      # short_drama(3-5min/集) | long_drama(45min/集)
+  short_drama_scenes: 2            # 短剧每集场景数
+  long_drama_scenes: 10            # 长剧每集场景数
+  cliffhanger_required: true       # 每集是否必须有悬念结尾
+  min_conflict_per_episode: 1      # 每集最小冲突节点数
+  max_chapters_per_episode: 5      # 每集最大覆盖章节数
+  generate_investor_notes: true    # 是否生成招商审核备注
 
 # ── 知识库配置 ──
 knowledge:

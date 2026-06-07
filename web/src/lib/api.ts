@@ -152,11 +152,78 @@ export function runFinalCheck(name: string) {
 
 export function runAuto(
   name: string,
-  opts: { source_dir?: string; title?: string; author?: string; episodes?: number }
+  opts: {
+    source_dir?: string;
+    title?: string;
+    author?: string;
+    episodes?: number;
+    adaptation_mode?: string;
+    target_format?: string;
+  }
 ) {
   return fetchJSON<{ task_id: string; status: string }>(
     `/api/projects/${encodeURIComponent(name)}/auto`,
     { method: "POST", body: JSON.stringify(opts) }
+  );
+}
+
+// ── v2.1: Content grading & episode rhythm ──
+
+export interface GradingStats {
+  total: number;
+  S_count: number;
+  A_count: number;
+  B_count: number;
+  S_ratio: number;
+  A_ratio: number;
+  B_ratio: number;
+}
+
+export function getGradingStats(name: string) {
+  return fetchJSON<{ stats: GradingStats | null; message?: string }>(
+    `/api/projects/${encodeURIComponent(name)}/grading-stats`
+  );
+}
+
+export interface ConflictNode {
+  node_id: string;
+  type: string;
+  chapter_id: number;
+  position: number;
+  intensity: number;
+  description: string;
+}
+
+export function getConflictMap(name: string) {
+  return fetchJSON<{ nodes: ConflictNode[]; total: number; message?: string }>(
+    `/api/projects/${encodeURIComponent(name)}/conflict-map`
+  );
+}
+
+export interface EpisodeAnnotations {
+  episode_id: number;
+  chapters_range: string;
+  opening_hook: string;
+  mid_conflict: string;
+  cliffhanger: string;
+  highlights: string[];
+  foreshadowing: { description: string; type: string }[];
+  investor_notes: string;
+}
+
+export function getEpisodeAnnotations(name: string, episode: number) {
+  return fetchJSON<{ annotations: EpisodeAnnotations | null; message?: string }>(
+    `/api/projects/${encodeURIComponent(name)}/episodes/${episode}/annotations`
+  );
+}
+
+export function updateRhythmConfig(
+  name: string,
+  opts: { adaptation_mode: string; target_format: string }
+) {
+  return fetchJSON<{ status: string }>(
+    `/api/projects/${encodeURIComponent(name)}/rhythm-config`,
+    { method: "PUT", body: JSON.stringify(opts) }
   );
 }
 

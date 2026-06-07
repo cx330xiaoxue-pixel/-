@@ -13,12 +13,27 @@ import {
   Eye,
   Code,
   Image as ImageIcon,
+  Star,
+  Lightning,
+  Target,
+  FlagBanner,
+  WarningCircle,
 } from "@phosphor-icons/react";
-import { getScript, type ScriptData } from "@/lib/api";
+import {
+  getScript,
+  getReport,
+  listOutputFiles,
+  getGradingStats,
+  getConflictMap,
+  getEpisodeAnnotations,
+  type ScriptData,
+  type GradingStats,
+  type ConflictNode,
+  type EpisodeAnnotations,
+} from "@/lib/api";
 
-const DEFAULT_PROJECT = "青云之路";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-/* ── Tab definitions ── */
 const TABS = [
   { id: "ingest", label: "导入", icon: Upload },
   { id: "analyze", label: "分析", icon: ChartBar },
@@ -26,71 +41,87 @@ const TABS = [
   { id: "write", label: "剧本", icon: Article },
   { id: "review", label: "审核", icon: CheckSquare },
   { id: "storyboard", label: "分镜", icon: FilmStrip },
+  { id: "images", label: "图片", icon: ImageIcon },
   { id: "export", label: "导出", icon: Download },
 ];
 
-/* ── Syntax-highlighted YAML viewer ── */
-function YamlViewer({ content }: { content: string }) {
-  const highlighted = content
-    .split("\n")
-    .map((line) => {
-      const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-      const trimmed = line.trim();
-
-      if (!trimmed || trimmed.startsWith("#"))
-        return `<span style="padding-left:${
-          indent * 2
-        }ch"><span class="yaml-comment">${trimmed}</span></span>`;
-
-      const colonIdx = trimmed.indexOf(":");
-      if (colonIdx === -1)
-        return `<span style="padding-left:${indent * 2}ch">${trimmed}</span>`;
-
-      const key = trimmed.slice(0, colonIdx);
-      const value = trimmed.slice(colonIdx + 1).trim();
-
-      let valClass = "yaml-val";
-      if (value === "true" || value === "false") valClass = "yaml-bool";
-      else if (/^\d+$/.test(value)) valClass = "yaml-num";
-
-      return `<span style="padding-left:${indent * 2}ch"><span class="yaml-key">${key}</span>: <span class="${valClass}">${value}</span></span>`;
-    })
-    .join("\n");
-
-  return (
-    <pre
-      className="code-surface p-5 overflow-x-auto text-[13px] leading-[1.7]"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
-  );
+function downloadFile(content: string, filename: string, mime = "text/yaml") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
-/* ── Placeholder panel ── */
-function PlaceholderPanel({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-}) {
+/* ── YAML Viewer ── */
+function YamlViewer({ content }: { content: string }) {
+  const highlighted = content.split("\n").map((line) => {
+    const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#"))
+      return `<span style="padding-left:${indent * 2}ch"><span class="yaml-comment">${trimmed || " "}</span></span>`;
+    const colonIdx = trimmed.indexOf(":");
+    if (colonIdx === -1) return `<span style="padding-left:${indent * 2}ch">${trimmed}</span>`;
+    const key = trimmed.slice(0, colonIdx);
+    const value = trimmed.slice(colonIdx + 1).trim();
+    let cls = "yaml-val";
+    if (value === "true" || value === "false") cls = "yaml-bool";
+    else if (/^\d+(\.\d+)?$/.test(value)) cls = "yaml-num";
+    return `<span style="padding-left:${indent * 2}ch"><span class="yaml-key">${key}</span>: <span class="${cls}">${value}</span></span>`;
+  }).join("\n");
+  return <pre className="code-surface p-5 overflow-x-auto text-[13px] leading-[1.7]" dangerouslySetInnerHTML={{ __html: highlighted }} />;
+}
+
+/* ── Empty state ── */
+function EmptyState({ icon: Icon, title, desc }: { icon: React.ElementType; title: string; desc: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <div className="w-16 h-16 rounded-2xl bg-[#18181b] border border-[#27272a] flex items-center justify-center mb-5">
         <Icon size={28} className="text-[#71717a]" />
       </div>
       <h3 className="text-lg font-semibold text-[#f4f4f5] mb-2">{title}</h3>
-      <p className="text-sm text-[#a1a1aa] max-w-[400px]">{description}</p>
-      <p className="mt-4 text-[11px] font-mono text-[#71717a]">
-        运行管线以填充此区域
-      </p>
+      <p className="text-sm text-[#a1a1aa] max-w-[400px]">{desc}</p>
     </div>
   );
 }
 
-/* ── Script Editor Panel ── */
-function ScriptPanel() {
+/* ── Ingest Panel ── */
+function IngestPanel({ projectName }: { projectName: string }) {
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true); setMessage("");
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) formData.append("files", files[i]);
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectName)}/upload`, { method: "POST", body: formData });
+      const data = await res.json();
+      setMessage(res.ok ? `✅ 已上传 ${data.files_saved} 个文件` : `❌ ${data.detail || JSON.stringify(data)}`);
+    } catch (err) { setMessage(`❌ 上传失败: ${String(err)}`); }
+    setUploading(false);
+  };
+  return (
+    <div className="card-surface p-6 flex flex-col gap-4">
+      <div className="flex items-center gap-2.5"><Upload size={18} className="text-[#d4a853]" /><h3 className="text-sm font-semibold text-[#f4f4f5]">上传小说章节</h3></div>
+      <p className="text-[13px] text-[#a1a1aa]">上传 .txt 小说章节文件。文件名请包含数字编号，如 01_初入江湖.txt</p>
+      <label className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-[#27272a] rounded-xl hover:border-[#d4a853]/50 cursor-pointer transition-colors">
+        <Upload size={32} className="text-[#71717a]" />
+        <span className="text-sm text-[#71717a]">{uploading ? "上传中..." : "点击选择 .txt 文件（可多选）"}</span>
+        <input type="file" multiple accept=".txt" onChange={handleUpload} disabled={uploading} className="hidden" />
+      </label>
+      {message && <p className={`text-[13px] ${message.startsWith("✅") ? "text-[#22c55e]" : "text-[#ef4444]"}`}>{message}</p>}
+    </div>
+  );
+}
+
+/* ── Script Panel ── */
+function ScriptPanel({ projectName }: { projectName: string }) {
   const [episode, setEpisode] = useState(1);
   const [view, setView] = useState<"yaml" | "preview">("yaml");
   const [script, setScript] = useState<ScriptData | null>(null);
@@ -98,365 +129,540 @@ function ScriptPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchScript = useCallback(async (ep: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getScript(DEFAULT_PROJECT, ep);
-      setScript(data);
-    } catch (e) {
-      setError(String(e));
-      setScript(null);
-    }
+    setLoading(true); setError(null);
+    try { const data = await getScript(projectName, ep); setScript(data); } catch (e) { setError(String(e)); setScript(null); }
     setLoading(false);
   }, []);
+  useEffect(() => { fetchScript(episode); }, [episode, fetchScript]);
 
+  const sceneCount = script?.content ? (script.content.match(/scene_id/g) || []).length : 0;
+  const elemCount = script?.content ? (script.content.match(/element_id/g) || []).length : 0;
+
+  // v2.1: 分级统计
+  const [gradingStats, setGradingStats] = useState<GradingStats | null>(null);
   useEffect(() => {
-    fetchScript(episode);
-  }, [episode, fetchScript]);
+    getGradingStats(projectName).then(r => { if (r.stats && r.stats.total > 0) setGradingStats(r.stats); }).catch(() => {});
+  }, [projectName, script]);
 
-  // Count scenes and elements from YAML content
-  const sceneCount = script?.content
-    ? (script.content.match(/^\s*- id:/gm) || []).length
-    : 0;
-  const elementCount = script?.content
-    ? (script.content.match(/^\s*- type:/gm) || []).length
-    : 0;
+  // YAML → 纯文本剧本
+  const handleDownloadTxt = () => {
+    if (!script?.content) return;
+    const lines: string[] = [];
+    const content = script.content;
+
+    // 用正则从 YAML 中提取章节和场景信息
+    const chapterMatch = content.match(/chapters:/);
+    if (!chapterMatch) { downloadFile(content, `ep${episode.toString().padStart(2, "0")}_script.txt`, "text/plain"); return; }
+
+    // 提取标题
+    const titleMatch = content.match(/script_title:\s*(.+)/);
+    const title = titleMatch ? titleMatch[1] : `第${episode}集`;
+
+    lines.push(title);
+    lines.push("=".repeat(50));
+    lines.push("");
+
+    // 按场景分割
+    const sceneBlocks = content.split(/(?=  - scene_id:)/);
+    for (const block of sceneBlocks) {
+      if (!block.includes("scene_id:")) continue;
+
+      const locMatch = block.match(/location:\s*(.+)/);
+      const timeMatch = block.match(/time:\s*(.+)/);
+      const atmMatch = block.match(/atmosphere:\s*(.+)/);
+      const sceneNum = block.match(/scene_number:\s*(\d+)/);
+
+      const location = locMatch ? locMatch[1].trim() : "未知";
+      const time = timeMatch ? timeMatch[1].trim() : "";
+      const atmosphere = atmMatch ? atmMatch[1].trim() : "";
+
+      lines.push(`【场景${sceneNum ? sceneNum[1] : "?"}】${location}${time ? " · " + time : ""}${atmosphere ? " · " + atmosphere : ""}`);
+      lines.push("");
+
+      // 提取元素
+      const elemBlocks = block.split(/(?=  - element_id:)/);
+      for (const eb of elemBlocks) {
+        if (!eb.includes("element_id:")) continue;
+        const typeMatch = eb.match(/type:\s*(.+)/);
+        const roleMatch = eb.match(/role:\s*(.+)/);
+        const textMatch = eb.match(/text:\s*(.+)/);
+        const emotionMatch = eb.match(/emotion:\s*(.+)/);
+        const actionMatch = eb.match(/action:\s*(.+)/);
+        const subtextMatch = eb.match(/subtext:\s*(.+)/);
+
+        const type = typeMatch ? typeMatch[1].trim() : "";
+        const role = roleMatch ? roleMatch[1].trim() : "";
+        const text = textMatch ? textMatch[1].trim() : "";
+        const emotion = emotionMatch ? emotionMatch[1].trim() : "";
+        const action = actionMatch ? actionMatch[1].trim() : "";
+        const subtext = subtextMatch ? subtextMatch[1].trim() : "";
+
+        if (type === "dialogue" && role !== "旁白") {
+          const emot = emotion ? `（${emotion}）` : "";
+          lines.push(`  ${role}${emot}：${text}`);
+        } else if (type === "action") {
+          const actText = action || text;
+          lines.push(`  [${actText}]`);
+        } else if (type === "narration" || type === "description") {
+          lines.push(`  ${text}`);
+        } else if (text) {
+          lines.push(`  ${text}`);
+        }
+      }
+      lines.push("");
+    }
+
+    downloadFile(lines.join("\n"), `ep${episode.toString().padStart(2, "0")}_剧本.txt`, "text/plain;charset=utf-8");
+  };
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Episode selector */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="text-sm text-[#71717a]">集数:</span>
         {[1, 2, 3].map((ep) => (
-          <button
-            key={ep}
-            onClick={() => setEpisode(ep)}
-            className={`px-3 py-1.5 text-[13px] font-mono rounded-md transition-all duration-200 ${
-              episode === ep
-                ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30"
-                : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"
-            }`}
-          >
-            Ep {ep.toString().padStart(2, "0")}
+          <button key={ep} onClick={() => setEpisode(ep)} className={`px-3 py-1.5 text-[13px] font-mono rounded-md transition-all ${
+            episode === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+            第{ep.toString().padStart(2, "0")}集
           </button>
         ))}
+        <div className="ml-auto flex gap-2">
+          <button onClick={handleDownloadTxt} disabled={!script?.content}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <FileText size={14} /> 下载 TXT</button>
+          <button onClick={() => script?.content && downloadFile(script.content, `ep${episode.toString().padStart(2, "0")}_script.yaml`)} disabled={!script?.content}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <Download size={14} /> 下载 YAML</button>
+        </div>
       </div>
-
-      {/* View toggle */}
       <div className="flex items-center gap-1 p-1 bg-[#18181b] border border-[#27272a] rounded-lg w-fit">
-        <button
-          onClick={() => setView("yaml")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${
-            view === "yaml"
-              ? "bg-[#09090b] text-[#d4a853] shadow-sm"
-              : "text-[#71717a] hover:text-[#a1a1aa]"
-          }`}
-        >
-          <Code size={14} /> YAML
-        </button>
-        <button
-          onClick={() => setView("preview")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${
-            view === "preview"
-              ? "bg-[#09090b] text-[#d4a853] shadow-sm"
-              : "text-[#71717a] hover:text-[#a1a1aa]"
-          }`}
-        >
-          <Eye size={14} /> 预览
-        </button>
+        <button onClick={() => setView("yaml")} className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${view === "yaml" ? "bg-[#09090b] text-[#d4a853]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}><Code size={14} /> YAML</button>
+        <button onClick={() => setView("preview")} className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${view === "preview" ? "bg-[#09090b] text-[#d4a853]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}><Eye size={14} /> 预览</button>
       </div>
 
-      {/* Content */}
-      {loading ? (
-        <div className="card-surface p-12 flex items-center justify-center">
-          <p className="text-sm text-[#71717a]">正在从API加载剧本...</p>
-        </div>
-      ) : error ? (
-        <div className="card-surface p-12 flex flex-col items-center justify-center gap-3">
-          <p className="text-sm text-[#a1a1aa]">暂无剧本数据</p>
-          <p className="text-[11px] font-mono text-[#71717a]">
-            运行管线以生成剧本，或检查API服务器是否正常运行。
-          </p>
-        </div>
-      ) : view === "yaml" ? (
-        <YamlViewer content={script?.content || "# 暂无剧本数据\n# 运行管线以生成剧本"} />
-      ) : (
-        <div className="card-surface p-8">
-          <div className="max-w-[65ch] mx-auto space-y-6 text-sm leading-relaxed text-[#a1a1aa]">
-            <h3 className="text-xl font-semibold text-[#f4f4f5]">
-              第{episode}集: 剧本预览
-            </h3>
-            <div className="flex items-center gap-4 text-[11px] font-mono text-[#71717a]">
-              <span>场次: {sceneCount}</span>
-              <span>元素: {elementCount}</span>
-              <span>路径: {script?.path || "无"}</span>
+      {/* v2.1: 内容分级统计 */}
+      {gradingStats && (
+        <div className="card-surface p-4 flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Star size={16} weight="fill" className="text-[#22c55e]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">S级核心</span>
+            <span className="text-lg font-mono font-semibold text-[#22c55e]">{gradingStats.S_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.S_ratio}%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Lightning size={16} weight="fill" className="text-[#d4a853]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">A级辅助</span>
+            <span className="text-lg font-mono font-semibold text-[#d4a853]">{gradingStats.A_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.A_ratio}%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <WarningCircle size={16} weight="fill" className="text-[#ef4444]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">B级冗余</span>
+            <span className="text-lg font-mono font-semibold text-[#ef4444]">{gradingStats.B_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.B_ratio}% · 已过滤)</span>
+          </div>
+          <div className="flex-1 h-2 bg-[#18181b] rounded-full overflow-hidden min-w-[120px]">
+            <div className="flex h-full">
+              <div style={{ width: `${gradingStats.S_ratio}%` }} className="bg-[#22c55e] transition-all" />
+              <div style={{ width: `${gradingStats.A_ratio}%` }} className="bg-[#d4a853] transition-all" />
+              <div style={{ width: `${gradingStats.B_ratio}%` }} className="bg-[#ef4444]/30 transition-all" />
             </div>
-            <p className="text-[#f4f4f5]">
-              {script?.content
-                ? "已从API加载剧本。切换到YAML视图查看完整语法高亮内容。"
-                : "尚未生成剧本。运行「编写」阶段以生成单集剧本。"}
-            </p>
           </div>
         </div>
       )}
+      {loading ? <div className="card-surface p-12 flex items-center justify-center"><p className="text-sm text-[#71717a]">加载中...</p></div>
+      : error ? <EmptyState icon={Article} title="暂无剧本" desc="运行管线以生成剧本。" />
+      : view === "yaml" ? <YamlViewer content={script?.content || "# 暂无数据"} />
+      : <div className="card-surface p-8"><div className="max-w-[65ch] mx-auto space-y-4 text-sm">
+        <h3 className="text-xl font-semibold text-[#f4f4f5]">第{episode}集</h3>
+        <div className="flex gap-4 text-[11px] font-mono text-[#71717a]"><span>场景: {sceneCount}</span><span>元素: {elemCount}</span></div>
+        <p className="text-[#a1a1aa]">切换 YAML 视图查看完整剧本，或点下载按钮保存。</p>
+      </div></div>}
+    </div>
+  );
+}
+
+/* ── Review Panel ── */
+function ReviewPanel({ projectName }: { projectName: string }) {
+  const [episode, setEpisode] = useState(1);
+  const [report, setReport] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchReport = useCallback(async (ep: number) => {
+    setLoading(true);
+    try { const r = await getReport(projectName, `review-${ep}`); setReport(r.content); } catch { setReport(null); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { fetchReport(episode); }, [episode, fetchReport]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-[#71717a]">集数:</span>
+        {[1, 2, 3].map((ep) => (
+          <button key={ep} onClick={() => setEpisode(ep)} className={`px-3 py-1.5 text-[13px] font-mono rounded-md transition-all ${
+            episode === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+            第{ep.toString().padStart(2, "0")}集
+          </button>
+        ))}
+      </div>
+      {loading ? <div className="card-surface p-12 text-center text-sm text-[#71717a]">加载审核报告...</div>
+      : report ? <div className="card-surface p-6"><pre className="text-[13px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap font-mono">{report}</pre></div>
+      : <EmptyState icon={CheckSquare} title="暂无审核报告" desc="运行管线后查看审核结果。" />}
+    </div>
+  );
+}
+
+/* ── Storyboard Panel ── */
+function StoryboardPanel({ projectName }: { projectName: string }) {
+  const [episode, setEpisode] = useState(1);
+  const [sbJson, setSbJson] = useState<{ scene_count: number; total_beats: number; total_shots: number; sequences: any[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_URL}/api/projects/${encodeURIComponent(projectName)}/download/storyboard/ep${episode.toString().padStart(2, "0")}/sequence_board.json`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setSbJson(d); setLoading(false); })
+      .catch(() => { setSbJson(null); setLoading(false); });
+  }, [episode]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-[#71717a]">集数:</span>
+        {[1, 2, 3].map((ep) => (
+          <button key={ep} onClick={() => setEpisode(ep)} className={`px-3 py-1.5 text-[13px] font-mono rounded-md transition-all ${
+            episode === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+            第{ep.toString().padStart(2, "0")}集
+          </button>
+        ))}
+        {sbJson && <span className="ml-auto text-[11px] font-mono text-[#71717a]">{sbJson.scene_count}场景 · {sbJson.total_shots}镜头 · {sbJson.total_beats}节拍</span>}
+      </div>
+      {loading ? <div className="card-surface p-12 text-center text-sm text-[#71717a]">加载中...</div>
+      : !sbJson ? <EmptyState icon={FilmStrip} title="暂无分镜" desc="运行管线后生成分镜数据。" />
+      : <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {sbJson.sequences.map((seq: any, i: number) => (
+          <div key={i} className="card-surface p-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-[#f4f4f5]">场景 {seq.scene_number}</span>
+              <span className="text-[11px] font-mono text-[#71717a]">{seq.shot_count} 镜头</span>
+            </div>
+            <div className="text-[12px] text-[#a1a1aa]">
+              📍 {seq.location} · 🕐 {seq.time} · 🎭 {seq.atmosphere || "—"}
+            </div>
+            <div className="text-[11px] text-[#71717a]">节拍: {seq.beats.join(" · ")}</div>
+            <div className="mt-2 space-y-1 max-h-[300px] overflow-y-auto">
+              {seq.shots.slice(0, 10).map((shot: any) => (
+                <div key={shot.shot_id} className="flex items-start gap-2 text-[11px] py-1 border-b border-[#1f1f23] last:border-0">
+                  <span className="font-mono text-[#d4a853] shrink-0 w-[24px]">{shot.camera}</span>
+                  <span className="text-[#71717a] font-mono shrink-0 w-[60px] truncate">{shot.role}</span>
+                  <span className="text-[#a1a1aa] truncate">{shot.text}</span>
+                </div>
+              ))}
+              {seq.shot_count > 10 && <div className="text-[10px] text-[#71717a] text-center">... 还有 {seq.shot_count - 10} 个镜头</div>}
+            </div>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+/* ── Plan Panel (v2.1 enhanced) ── */
+function PlanPanel({ projectName }: { projectName: string }) {
+  const [plan, setPlan] = useState<string | null>(null);
+  const [emotion, setEmotion] = useState<any[] | null>(null);
+  const [conflictNodes, setConflictNodes] = useState<ConflictNode[]>([]);
+  const [selectedEp, setSelectedEp] = useState(1);
+  const [annotations, setAnnotations] = useState<EpisodeAnnotations | null>(null);
+
+  useEffect(() => {
+    getReport(projectName, "plan").then(r => setPlan(r.content)).catch(() => setPlan(null));
+    getReport(projectName, "emotion").then(r => {
+      try { setEmotion(JSON.parse(r.content)); } catch { setEmotion(null); }
+    }).catch(() => setEmotion(null));
+    getConflictMap(projectName).then(r => { if (r.nodes) setConflictNodes(r.nodes); }).catch(() => {});
+  }, [projectName]);
+
+  // Load annotations for selected episode
+  useEffect(() => {
+    getEpisodeAnnotations(projectName, selectedEp)
+      .then(r => { if (r.annotations) setAnnotations(r.annotations); else setAnnotations(null); })
+      .catch(() => setAnnotations(null));
+  }, [projectName, selectedEp]);
+
+  const nodeTypes: Record<string, { icon: string; color: string }> = {
+    major_twist: { icon: "🔀", color: "#ef4444" },
+    scene_shift: { icon: "🎬", color: "#3b82f6" },
+    emotional_peak: { icon: "📈", color: "#22c55e" },
+    cliffhanger: { icon: "🪝", color: "#d4a853" },
+    resolution_point: { icon: "✅", color: "#8b5cf6" },
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* 分集规划 */}
+      <div className="card-surface p-6 flex flex-col gap-4">
+        <div className="flex items-center gap-2.5">
+          <TreeStructure size={18} className="text-[#d4a853]" />
+          <h3 className="text-sm font-semibold text-[#f4f4f5]">分集规划</h3>
+          {conflictNodes.length > 0 && (
+            <span className="ml-auto text-[11px] font-mono text-[#71717a]">
+              {conflictNodes.length} 冲突节点
+            </span>
+          )}
+        </div>
+
+        {/* 冲突节点分布 */}
+        {conflictNodes.length > 0 && (
+          <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+            <div className="text-[11px] text-[#71717a] mb-2 font-medium">冲突节点分布</div>
+            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
+              {conflictNodes.map((n) => {
+                const nt = nodeTypes[n.type] || { icon: "•", color: "#71717a" };
+                return (
+                  <span key={n.node_id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-[#18181b] border border-[#27272a]"
+                    title={n.description}>
+                    <span>{nt.icon}</span>
+                    <span className="text-[#a1a1aa]">第{n.chapter_id}章</span>
+                    <span style={{ color: nt.color }} className="font-mono">{n.type}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {plan ? <pre className="text-[13px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">{plan}</pre>
+        : <p className="text-sm text-[#71717a]">暂无规划数据，运行管线后生成。</p>}
+      </div>
+
+      {/* 右侧: 情绪曲线 + 剧集标注 */}
+      <div className="flex flex-col gap-5">
+        {/* 情绪曲线 */}
+        <div className="card-surface p-6 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <ChartBar size={18} className="text-[#d4a853]" />
+            <h3 className="text-sm font-semibold text-[#f4f4f5]">情绪曲线</h3>
+          </div>
+          {emotion && emotion.length > 0 ? (
+            <div className="space-y-3 max-h-[260px] overflow-y-auto">
+              {emotion.map((ep: any) => (
+                <div key={ep.episode_id} className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="flex justify-between text-[13px] mb-1.5">
+                    <span className="text-[#f4f4f5] font-medium">第{ep.episode_id}集</span>
+                    <span className="text-[#71717a] font-mono text-[11px]">峰值{ep.peak_value}/谷值{ep.valley_value}</span>
+                  </div>
+                  <div className="flex items-end gap-0.5 h-12 mb-1.5">
+                    {(ep.emotion_sequence || []).map((v: number, i: number) => (
+                      <div key={i} className="flex-1 rounded-t-sm transition-all" style={{
+                        height: `${Math.max(4, (v / 10) * 100)}%`,
+                        backgroundColor: v >= 7 ? '#22c55e' : v >= 4 ? '#d4a853' : '#ef4444',
+                        opacity: 0.75,
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-[#71717a]">暂无情绪曲线数据。</p>}
+        </div>
+
+        {/* v2.1: 剧集标注 */}
+        <div className="card-surface p-6 flex flex-col gap-4 flex-1">
+          <div className="flex items-center gap-2.5">
+            <FlagBanner size={18} className="text-[#d4a853]" />
+            <h3 className="text-sm font-semibold text-[#f4f4f5]">剧集标注</h3>
+          </div>
+
+          {/* Episode selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[#71717a]">集数:</span>
+            {[1, 2, 3].map((ep) => (
+              <button key={ep} onClick={() => setSelectedEp(ep)} className={`px-2.5 py-1 text-[12px] font-mono rounded-md transition-all ${
+                selectedEp === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+                第{ep.toString().padStart(2, "0")}集
+              </button>
+            ))}
+          </div>
+
+          {annotations ? (
+            <div className="space-y-3 max-h-[350px] overflow-y-auto">
+              {/* 开篇钩子 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#d4a853] font-medium mb-1">
+                  <Target size={12} weight="fill" /> 开篇钩子
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.opening_hook}</p>
+              </div>
+
+              {/* 中段冲突 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#ef4444] font-medium mb-1">
+                  <Lightning size={12} weight="fill" /> 中段冲突
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.mid_conflict}</p>
+              </div>
+
+              {/* 结尾悬念 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#3b82f6] font-medium mb-1">
+                  <Star size={12} weight="fill" /> 结尾悬念
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.cliffhanger}</p>
+              </div>
+
+              {/* 核心看点 */}
+              {annotations.highlights && annotations.highlights.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="text-[11px] text-[#22c55e] font-medium mb-1.5">核心看点</div>
+                  <div className="space-y-1">
+                    {annotations.highlights.map((h, i) => (
+                      <div key={i} className="text-[12px] text-[#a1a1aa]">{h}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 伏笔 */}
+              {annotations.foreshadowing && annotations.foreshadowing.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="text-[11px] text-[#8b5cf6] font-medium mb-1.5">剧情伏笔</div>
+                  <div className="space-y-1.5">
+                    {annotations.foreshadowing.map((f, i) => (
+                      <div key={i} className="text-[12px] text-[#a1a1aa] flex items-start gap-1.5">
+                        <span className="text-[10px] text-[#8b5cf6] mt-0.5">◆</span>
+                        <span>{f.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 招商备注摘要 */}
+              {annotations.investor_notes && (
+                <details className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <summary className="text-[11px] text-[#71717a] font-medium cursor-pointer hover:text-[#a1a1aa]">
+                    招商/审核参考
+                  </summary>
+                  <pre className="mt-2 text-[11px] text-[#71717a] whitespace-pre-wrap font-mono leading-relaxed max-h-[150px] overflow-y-auto">
+                    {annotations.investor_notes}
+                  </pre>
+                </details>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-[#71717a]">运行管线后查看剧集标注（看点/伏笔/招商备注）。</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ── Analysis Panel ── */
-function AnalysisPanel() {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <div className="card-surface p-6 flex flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <FileText size={18} className="text-[#d4a853]" />
-          <h3 className="text-sm font-semibold text-[#f4f4f5]">
-            分析报告
-          </h3>
-        </div>
-        <div className="space-y-3 text-sm text-[#a1a1aa]">
-          {[
-            ["叙事结构", "三幕式"],
-            ["视角", "第三人称限知"],
-            ["节奏评分", "84/100"],
-            ["改编难度", "中等"],
-            ["推荐媒介", "电视剧"],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              className="flex justify-between py-2 border-b border-[#1f1f23] last:border-0"
-            >
-              <span>{label}</span>
-              <span className="font-mono text-[#d4a853]">{value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="card-surface p-6 flex flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <ChartBar size={18} className="text-[#d4a853]" />
-          <h3 className="text-sm font-semibold text-[#f4f4f5]">
-            角色关系网络
-          </h3>
-        </div>
-        <div className="space-y-3 text-sm">
-          {[
-            { name: "林逸", role: "主角", relations: 8, arc: "上升" },
-            { name: "老者", role: "导师", relations: 2, arc: "退场" },
-            { name: "小翠", role: "盟友", relations: 4, arc: "出场" },
-            { name: "黑衣人", role: "反派", relations: 5, arc: "发展" },
-            { name: "萧剑", role: "对手", relations: 6, arc: "伏笔" },
-          ].map((char) => (
-            <div
-              key={char.name}
-              className="flex items-center justify-between py-2 border-b border-[#1f1f23] last:border-0"
-            >
-              <div>
-                <span className="text-[#f4f4f5] font-medium">{char.name}</span>
-                <span className="ml-2 text-[11px] font-mono text-[#71717a]">
-                  {char.role}
-                </span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-[11px] text-[#71717a]">
-                  {char.relations} 个关联
-                </span>
-                <span
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${
-                    char.arc === "上升" || char.arc === "发展"
-                      ? "bg-[#22c55e]/10 text-[#22c55e]"
-                      : char.arc === "伏笔"
-                      ? "bg-[#3b82f6]/10 text-[#3b82f6]"
-                      : "bg-[#71717a]/10 text-[#71717a]"
-                  }`}
-                >
-                  {char.arc}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function AnalysisPanel({ projectName }: { projectName: string }) {
+  const [report, setReport] = useState<string | null>(null);
+  useEffect(() => { getReport(projectName, "analysis").then(r => setReport(r.content)).catch(() => setReport(null)); }, []);
+  return report ? <div className="card-surface p-6"><pre className="text-[13px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap font-mono">{report}</pre></div> : <EmptyState icon={ChartBar} title="暂无分析报告" desc="运行管线后生成。" />;
 }
 
 /* ── Export Panel ── */
-function ExportPanel() {
-  const items = [
-    {
-      label: "YAML 剧本",
-      desc: "全部集数，Schema v2.0 YAML格式，含完整元数据",
-      icon: Code,
-      size: "~240 KB",
-    },
-    {
-      label: "纯文本",
-      desc: "标准剧本格式，兼容外部编辑工具",
-      icon: FileText,
-      size: "~180 KB",
-    },
-    {
-      label: "分镜包",
-      desc: "镜头列表、帧描述和视觉参考合集",
-      icon: ImageIcon,
-      size: "~420 KB",
-    },
-  ];
-
+function ExportPanel({ projectName }: { projectName: string }) {
+  const [files, setFiles] = useState<{ name: string; path: string; size: number }[]>([]);
+  useEffect(() => { listOutputFiles(projectName).then(r => setFiles(r.files)).catch(() => {}); }, []);
+  const downloadAll = async () => { for (let ep = 1; ep <= 3; ep++) { try { const d = await getScript(projectName, ep); if (d?.content) downloadFile(d.content, `ep${ep.toString().padStart(2, "0")}_script.yaml`); } catch {} } };
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Primary: YAML - spans 2 cols */}
         <div className="lg:col-span-2 card-surface p-6 flex flex-col md:flex-row gap-6 items-start">
-          <div className="w-12 h-12 rounded-xl bg-[#d4a853]/10 border border-[#d4a853]/20 flex items-center justify-center shrink-0">
-            <Code size={22} className="text-[#d4a853]" />
-          </div>
-          <div className="flex-1">
-            <h4 className="text-sm font-semibold text-[#f4f4f5]">
-              {items[0].label}
-            </h4>
-            <p className="text-[13px] text-[#a1a1aa] mt-1 max-w-[400px]">
-              {items[0].desc}
-            </p>
-            <p className="text-[11px] font-mono text-[#71717a] mt-2">
-              {items[0].size}
-            </p>
-          </div>
-          <button className="px-5 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all duration-200 active:scale-[0.98] shrink-0">
-            下载 YAML
-          </button>
+          <div className="w-12 h-12 rounded-xl bg-[#d4a853]/10 border border-[#d4a853]/20 flex items-center justify-center shrink-0"><Download size={22} className="text-[#d4a853]" /></div>
+          <div className="flex-1"><h4 className="text-sm font-semibold text-[#f4f4f5]">全部剧本 (YAML)</h4><p className="text-[13px] text-[#a1a1aa] mt-1">下载全部已生成集数的 YAML 剧本。</p><p className="text-[11px] font-mono text-[#71717a] mt-2">{files.filter(f => f.path.endsWith(".yaml")).length} 个 YAML 文件</p></div>
+          <button onClick={downloadAll} className="px-5 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all active:scale-[0.98] shrink-0">下载全部</button>
         </div>
-
-        {/* Plain Text */}
         <div className="card-surface p-5 flex flex-col gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#d4a853]/10 border border-[#d4a853]/20 flex items-center justify-center">
-            <FileText size={18} className="text-[#d4a853]" />
+          <div className="w-10 h-10 rounded-lg bg-[#d4a853]/10 border border-[#d4a853]/20 flex items-center justify-center"><FileText size={18} className="text-[#d4a853]" /></div>
+          <h4 className="text-sm font-semibold text-[#f4f4f5]">项目文件</h4>
+          <div className="flex-1 max-h-[250px] overflow-y-auto mt-2 space-y-0.5">
+            {files.length === 0 ? <p className="text-[11px] text-[#71717a]">暂无文件</p>
+            : files.map(f => <div key={f.path} className="flex justify-between text-[11px] py-1 border-b border-[#1f1f23] last:border-0"><span className="text-[#a1a1aa] font-mono truncate max-w-[200px]">{f.path}</span><span className="text-[#71717a]">{Math.round(f.size/1024)} KB</span></div>)}
           </div>
-          <div>
-            <h4 className="text-sm font-semibold text-[#f4f4f5]">
-              {items[1].label}
-            </h4>
-            <p className="text-[12px] text-[#a1a1aa] mt-1">{items[1].desc}</p>
-            <p className="text-[11px] font-mono text-[#71717a] mt-2">
-              {items[1].size}
-            </p>
-          </div>
-          <button className="w-full mt-auto px-4 py-2 text-[13px] font-medium rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:border-[#3f3f46] transition-all duration-200 active:scale-[0.98]">
-            下载文本
-          </button>
         </div>
-      </div>
-
-      {/* Storyboard - full width */}
-      <div className="card-surface p-5 flex flex-col sm:flex-row gap-5 items-start">
-        <div className="w-10 h-10 rounded-lg bg-[#d4a853]/10 border border-[#d4a853]/20 flex items-center justify-center shrink-0">
-          <ImageIcon size={18} className="text-[#d4a853]" />
-        </div>
-        <div className="flex-1">
-          <h4 className="text-sm font-semibold text-[#f4f4f5]">
-            {items[2].label}
-          </h4>
-          <p className="text-[12px] text-[#a1a1aa] mt-1 max-w-[500px]">
-            {items[2].desc}
-          </p>
-          <p className="text-[11px] font-mono text-[#71717a] mt-2">
-            {items[2].size}
-          </p>
-        </div>
-        <button className="px-5 py-2 text-[13px] font-medium rounded-lg bg-[#d4a853] text-[#09090b] hover:bg-[#d4a853]/90 transition-all duration-200 active:scale-[0.98] shrink-0">
-          下载分镜包
-        </button>
       </div>
     </div>
   );
 }
 
-/* ── Main Phase Panels Component ── */
-export default function PhasePanels() {
-  const [activeTab, setActiveTab] = useState("write");
+/* ── Images Panel ── */
+function ImagesPanel({ projectName }: { projectName: string }) {
+  const [episode, setEpisode] = useState(1);
+  const [data, setData] = useState<{ images: { name: string; url: string; size: number }[]; prompts: any[] } | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const renderPanel = () => {
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_URL}/api/projects/${encodeURIComponent(projectName)}/images/${episode}`)
+      .then(r => r.json()).then(d => { setData(d); setLoading(false); })
+      .catch(() => { setData(null); setLoading(false); });
+  }, [episode]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-[#71717a]">集数:</span>
+        {[1, 2, 3].map((ep) => (
+          <button key={ep} onClick={() => setEpisode(ep)} className={`px-3 py-1.5 text-[13px] font-mono rounded-md transition-all ${
+            episode === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+            第{ep.toString().padStart(2, "0")}集
+          </button>
+        ))}
+        {data && <span className="ml-auto text-[11px] font-mono text-[#71717a]">{data.images.length} 张图片</span>}
+      </div>
+      {loading ? <div className="card-surface p-12 text-center text-sm text-[#71717a]">加载中...</div>
+      : !data || data.images.length === 0 ? <EmptyState icon={ImageIcon} title="暂无图片" desc="运行管线生成图片。需要配置图片 API key。" />
+      : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {data.images.map((img: any) => (
+          <div key={img.name} className="card-surface overflow-hidden">
+            <img src={`${API_URL}${img.url}`} alt={img.name} className="w-full h-48 object-cover" loading="lazy" />
+            <div className="p-2 flex justify-between text-[11px]">
+              <span className="text-[#a1a1aa] font-mono">{img.name}</span>
+              <span className="text-[#71717a]">{Math.round(img.size/1024)} KB</span>
+            </div>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+/* ── Main ── */
+export default function PhasePanels({ projectName }: { projectName: string }) {
+  const [activeTab, setActiveTab] = useState("write");
+  const render = () => {
     switch (activeTab) {
-      case "ingest":
-        return (
-          <PlaceholderPanel
-            icon={Upload}
-            title="导入与知识库"
-            description="上传源小说，扫描术语，为改编管线建立知识注册表。"
-          />
-        );
-      case "analyze":
-        return <AnalysisPanel />;
-      case "plan":
-        return (
-          <PlaceholderPanel
-            icon={TreeStructure}
-            title="分集规划"
-            description="章节到集数的映射，含情绪曲线设计和悬念钩子生成。"
-          />
-        );
-      case "write":
-        return <ScriptPanel />;
-      case "review":
-        return (
-          <PlaceholderPanel
-            icon={CheckSquare}
-            title="审核中心"
-            description="多维度审核：业务逻辑评分、合规检查和参考剧本对比。"
-          />
-        );
-      case "storyboard":
-        return (
-          <PlaceholderPanel
-            icon={FilmStrip}
-            title="分镜预览"
-            description="电影级镜头规划，双轨支持：传统Film分镜和Seedance AI。"
-          />
-        );
-      case "export":
-        return <ExportPanel />;
-      default:
-        return null;
+      case "ingest": return <IngestPanel projectName={projectName} />;
+      case "analyze": return <AnalysisPanel projectName={projectName} />;
+      case "plan": return <PlanPanel projectName={projectName} />;
+      case "write": return <ScriptPanel projectName={projectName} />;
+      case "review": return <ReviewPanel projectName={projectName} />;
+      case "storyboard": return <StoryboardPanel projectName={projectName} />;
+      case "images": return <ImagesPanel projectName={projectName} />;
+      case "export": return <ExportPanel projectName={projectName} />;
+      default: return null;
     }
   };
-
   return (
     <section id="dashboard" className="py-24 px-6">
       <div className="max-w-[1400px] mx-auto">
-        <div className="mb-10">
-          <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-[#f4f4f5]">
-            阶段详情
-          </h2>
-          <p className="mt-3 text-sm text-[#a1a1aa] max-w-[65ch]">
-            深入每个管线阶段。编辑剧本、查看分析、管理产出。
-          </p>
-        </div>
-
-        {/* Tabs */}
+        <div className="mb-10"><h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-[#f4f4f5]">阶段详情</h2><p className="mt-3 text-sm text-[#a1a1aa] max-w-[65ch]">深入每个管线阶段。编辑剧本、查看审核、管理分镜。</p></div>
         <div className="flex items-center gap-0.5 mb-8 overflow-x-auto pb-2 border-b border-[#27272a]">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium whitespace-nowrap rounded-t-lg transition-all duration-200 ${
-                activeTab === tab.id
-                  ? "text-[#d4a853] bg-[#d4a853]/5 border-b-2 border-[#d4a853]"
-                  : "text-[#71717a] hover:text-[#a1a1aa] border-b-2 border-transparent"
-              }`}
-            >
-              <tab.icon
-                size={15}
-                weight={activeTab === tab.id ? "fill" : "regular"}
-              />
-              {tab.label}
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium whitespace-nowrap rounded-t-lg transition-all ${activeTab === tab.id ? "text-[#d4a853] bg-[#d4a853]/5 border-b-2 border-[#d4a853]" : "text-[#71717a] hover:text-[#a1a1aa] border-b-2 border-transparent"}`}>
+              <tab.icon size={15} weight={activeTab === tab.id ? "fill" : "regular"} />{tab.label}
             </button>
           ))}
         </div>
-
-        {/* Panel content */}
-        <div key={activeTab}>{renderPanel()}</div>
+        <div key={activeTab}>{render()}</div>
       </div>
     </section>
   );

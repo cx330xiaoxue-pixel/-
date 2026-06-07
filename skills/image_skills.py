@@ -21,7 +21,7 @@ from typing import Optional
 class ImageGenerationSkill:
     """AI 图片生成技能 — 支持多 Provider 切换"""
 
-    PROVIDERS = ["openai", "nano_banana", "skyreels", "custom"]
+    PROVIDERS = ["openai", "ark", "nano_banana", "skyreels", "custom"]
 
     def __init__(self, config: dict = None):
         """
@@ -68,7 +68,7 @@ class ImageGenerationSkill:
         full_prompt = self._build_full_prompt(prompt, style)
 
         try:
-            if self.provider == "openai":
+            if self.provider in ("openai", "ark"):
                 result = self._generate_openai(full_prompt, size)
             elif self.provider == "nano_banana":
                 result = self._generate_nano_banana(full_prompt, negative_prompt, size)
@@ -78,7 +78,10 @@ class ImageGenerationSkill:
                 result = self._generate_custom(full_prompt, negative_prompt, size)
 
             if result.get("success") and output_path:
-                self._save_image(result["image_data"], output_path)
+                if "image_data" in result:
+                    self._save_image(result["image_data"], output_path)
+                elif "image_url" in result and result["image_url"]:
+                    self._download_image(result["image_url"], output_path)
                 result["image_path"] = output_path
 
             return result
@@ -147,19 +150,24 @@ class ImageGenerationSkill:
         return prefix + prompt + quality_suffix
 
     def _generate_openai(self, prompt: str, size: str) -> dict:
-        """OpenAI DALL-E / 兼容 API"""
+        """OpenAI DALL-E / Ark / 兼容 API"""
         from openai import OpenAI
         client = OpenAI(api_key=self.api_key, base_url=self.base_url or None)
-        resp = client.images.generate(
+
+        kwargs = dict(
             model=self.model or "dall-e-3",
             prompt=prompt,
             size=size or self.default_size,
-            quality=self.default_quality,
             n=1,
         )
+        # Ark/Doubao 不支持 quality 参数
+        if self.provider == "openai":
+            kwargs["quality"] = self.default_quality
+
+        resp = client.images.generate(**kwargs)
         return {
             "success": True,
-            "provider": "openai",
+            "provider": self.provider,
             "image_url": resp.data[0].url if resp.data else "",
             "prompt_used": prompt,
         }
@@ -223,6 +231,17 @@ class ImageGenerationSkill:
             "image_url": resp.data[0].url if resp.data else "",
             "prompt_used": prompt,
         }
+
+    def _download_image(self, url: str, path: str):
+        """从 URL 下载图片到本地"""
+        try:
+            import httpx
+            resp = httpx.get(url, timeout=30, follow_redirects=True)
+            resp.raise_for_status()
+            with open(path, "wb") as f:
+                f.write(resp.content)
+        except Exception as e:
+            print(f"  ⚠️  图片下载失败: {e}")
 
     def _save_image(self, image_data, path: str):
         """保存图片到文件"""

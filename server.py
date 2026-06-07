@@ -14,8 +14,9 @@ from datetime import datetime
 from typing import Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Add project root to path
@@ -24,6 +25,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.pipeline import Pipeline, create_pipeline
+
+# ── Load env vars ──
+try:
+    from dotenv import load_dotenv
+    _env_file = PROJECT_ROOT / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file)
+    else:
+        load_dotenv()  # try default
+except ImportError:
+    pass
 
 # ── App ──
 app = FastAPI(
@@ -47,6 +59,20 @@ if CONFIG_PATH.exists():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+# Override config with env vars
+for _key, _env_var in [
+    ("llm.api_key", "LLM_API_KEY"),
+    ("llm.base_url", "LLM_BASE_URL"),
+    ("llm.model", "LLM_MODEL"),
+    ("llm_light.api_key", "LLM_LIGHT_API_KEY"),
+    ("llm_light.base_url", "LLM_LIGHT_BASE_URL"),
+    ("llm_light.model", "LLM_LIGHT_MODEL"),
+]:
+    _val = os.getenv(_env_var, "")
+    if _val and _val != "sk-YOUR-API-KEY":
+        _section, _k = _key.split(".")
+        config.setdefault(_section, {})[_k] = _val
+
 OUTPUT_DIR = config.get("output", {}).get("output_dir", "./output")
 
 # ── Pipeline cache (one per project) ──
@@ -57,15 +83,62 @@ _lock = threading.Lock()
 _tasks: dict[str, dict] = {}
 _task_counter = 0
 
+# ── Agent factory (lazy, created once) ──
+_agents_cache: Optional[dict] = None
+
+def _has_valid_api_key() -> bool:
+    """Check if a valid API key is configured."""
+    key = config.get("llm", {}).get("api_key", "")
+    return bool(key) and key != "sk-YOUR-API-KEY" and len(key) > 10
+
+def _create_agents() -> dict:
+    """Create all pipeline agent instances."""
+    global _agents_cache
+    if _agents_cache is not None:
+        return _agents_cache
+
+    from agents import (
+        create_knowledge_curator,
+        create_novel_analyzer,
+        create_insight_architect,
+        create_episode_architect,
+        create_emotion_architect,
+        create_script_writer,
+        create_review_director,
+        create_continuity_recorder,
+        create_storyboard_director,
+        # v2.1
+        create_content_grader,
+        create_episode_director,
+    )
+
+    _agents_cache = {
+        "knowledge-curator": create_knowledge_curator(config=config),
+        "novel-analyzer": create_novel_analyzer(config=config),
+        "insight-architect": create_insight_architect(config=config),
+        "episode-architect": create_episode_architect(config=config),
+        "episode-director": create_episode_director(config=config),
+        "emotion-architect": create_emotion_architect(config=config),
+        "script-writer": create_script_writer(config=config),
+        "review-director": create_review_director(config=config),
+        "continuity-recorder": create_continuity_recorder(config=config),
+        "storyboard-director": create_storyboard_director(config=config),
+        # v2.1
+        "content-grader": create_content_grader(config=config),
+    }
+    return _agents_cache
+
 
 def _get_pipeline(project_name: str) -> Pipeline:
     """Get or create a pipeline for a project."""
     with _lock:
         if project_name not in _pipelines:
+            agents = _create_agents() if _has_valid_api_key() else {}
             _pipelines[project_name] = create_pipeline(
                 project_name=project_name,
                 output_dir=OUTPUT_DIR,
-                config_path=str(CONFIG_PATH),
+                config_path=config,  # 传 dict（含内存中的 API key）
+                agents=agents,
             )
         return _pipelines[project_name]
 
@@ -74,17 +147,25 @@ def _run_phase_task(task_id: str, project_name: str, phase: str, **kwargs):
     """Background: run a pipeline phase and store result."""
     try:
         pipeline = _get_pipeline(project_name)
-        result = pipeline._run_phase(phase, **kwargs)
+        if phase == "generate_images":
+            result = pipeline.generate_image_prompts(**kwargs)
+        else:
+            result = pipeline._run_phase(phase, **kwargs)
         _tasks[task_id] = {"status": "completed", "result": result}
     except Exception as e:
         _tasks[task_id] = {"status": "failed", "error": str(e)}
 
 
-def _run_auto_task(task_id: str, project_name: str, **kwargs):
+def _run_auto_task(task_id: str, project_name: str, adaptation_mode: str = "balanced", target_format: str = "long_drama", **kwargs):
     """Background: run full auto pipeline."""
     try:
         pipeline = _get_pipeline(project_name)
-        result = pipeline.auto(**kwargs)
+        # v2.1: 传递适应度模式和剧集格式
+        result = pipeline.auto(
+            adaptation_mode=adaptation_mode,
+            target_format=target_format,
+            **kwargs,
+        )
         _tasks[task_id] = {"status": "completed", "result": result}
     except Exception as e:
         _tasks[task_id] = {"status": "failed", "error": str(e)}
@@ -112,6 +193,8 @@ class AutoRequest(BaseModel):
     title: str = ""
     author: str = ""
     episodes: int = 3
+    adaptation_mode: str = "balanced"   # v2.1: strict | balanced | loose
+    target_format: str = "long_drama"   # v2.1: short_drama | long_drama
 
 
 # ═══════════════════════════════════════════════════
@@ -155,6 +238,33 @@ def create_project(body: ProjectCreate):
         "status": "created",
         "output_dir": str(PROJECT_ROOT / OUTPUT_DIR / body.name),
     }
+
+
+@app.post("/api/projects/{project_name}/upload")
+async def upload_files(project_name: str, files: list[UploadFile] = File(...)):
+    """Upload .txt novel chapter files for a project."""
+    upload_dir = PROJECT_ROOT / "uploads" / project_name
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for f in files:
+        if f.filename and f.filename.endswith(".txt"):
+            content = await f.read()
+            filepath = upload_dir / f.filename
+            with open(filepath, "wb") as out:
+                out.write(content)
+            saved += 1
+
+    return {"status": "ok", "files_saved": saved, "upload_dir": str(upload_dir)}
+
+
+@app.get("/api/projects/{project_name}/download/{file_path:path}")
+def download_file(project_name: str, file_path: str):
+    """Download a generated output file."""
+    full_path = PROJECT_ROOT / OUTPUT_DIR / project_name / file_path
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(full_path))
 
 
 @app.get("/api/projects/{project_name}/status")
@@ -230,6 +340,15 @@ def run_storyboard(project_name: str, episode: int, body: StoryboardRequest, bg:
     return {"task_id": task_id, "status": "started"}
 
 
+@app.post("/api/projects/{project_name}/generate-images/{episode}")
+def run_generate_images(project_name: str, episode: int, bg: BackgroundTasks):
+    """Generate image prompts (& actual images if API key configured) from storyboard."""
+    task_id = f"{project_name}-images-{episode}-{datetime.now().timestamp()}"
+    _tasks[task_id] = {"status": "running"}
+    bg.add_task(_run_phase_task, task_id, project_name, "generate_images", episode=episode)
+    return {"task_id": task_id, "status": "started"}
+
+
 @app.post("/api/projects/{project_name}/final-check")
 def run_final_check(project_name: str, bg: BackgroundTasks):
     """Phase 6: Final validation."""
@@ -244,6 +363,13 @@ def run_auto(project_name: str, body: AutoRequest, bg: BackgroundTasks):
     """Run full pipeline automatically."""
     task_id = f"{project_name}-auto-{datetime.now().timestamp()}"
     _tasks[task_id] = {"status": "running"}
+
+    # v2.1: 应用适应度模式和剧集格式到配置
+    if body.adaptation_mode:
+        config.setdefault("content_grading", {})["mode"] = body.adaptation_mode
+    if body.target_format:
+        config.setdefault("episode_rhythm", {})["target_format"] = body.target_format
+
     bg.add_task(
         _run_auto_task,
         task_id,
@@ -252,6 +378,8 @@ def run_auto(project_name: str, body: AutoRequest, bg: BackgroundTasks):
         title=body.title,
         author=body.author,
         episodes=body.episodes,
+        adaptation_mode=body.adaptation_mode,
+        target_format=body.target_format,
     )
     return {"task_id": task_id, "status": "started"}
 
@@ -292,12 +420,12 @@ def get_report(project_name: str, report_type: str):
         "analysis": report_dir / "analysis" / "analysis-report.md",
         "insight": report_dir / "analysis" / "insight-report.md",
         "plan": report_dir / "planning" / "episode-plan.md",
-        "emotion": report_dir / "planning" / "emotion-curve.md",
+        "emotion": report_dir / "planning" / "emotion-curve.json",
         "final": report_dir / "final-check-report.md",
     }
     if report_type.startswith("review-"):
         ep = report_type.split("-")[1]
-        type_to_path[report_type] = report_dir / "review" / f"review-ep{ep}.md"
+        type_to_path[report_type] = report_dir / "review" / f"review-ep{int(ep):02d}.md"
 
     path = type_to_path.get(report_type)
     if not path:
@@ -309,6 +437,40 @@ def get_report(project_name: str, report_type: str):
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     return {"type": report_type, "content": content, "path": str(path)}
+
+
+@app.get("/api/projects/{project_name}/images/{episode}")
+def list_images(project_name: str, episode: int):
+    """List generated images for an episode."""
+    img_dir = PROJECT_ROOT / OUTPUT_DIR / project_name / "images" / f"ep{episode:02d}"
+    if not img_dir.exists():
+        return {"images": [], "prompts": []}
+
+    images = []
+    prompts = []
+    for f in sorted(img_dir.iterdir()):
+        if f.suffix in (".png", ".jpg", ".jpeg", ".webp"):
+            images.append({
+                "name": f.name,
+                "url": f"/api/projects/{project_name}/images/{episode}/{f.name}",
+                "size": f.stat().st_size,
+            })
+        elif f.name == "image_prompts.json":
+            try:
+                with open(f, "r", encoding="utf-8") as pf:
+                    prompts = json.load(pf).get("prompts", [])[:5]
+            except Exception:
+                pass
+    return {"images": images, "prompts": prompts}
+
+
+@app.get("/api/projects/{project_name}/images/{episode}/{filename}")
+def serve_image(project_name: str, episode: int, filename: str):
+    """Serve a generated image file."""
+    img_path = PROJECT_ROOT / OUTPUT_DIR / project_name / "images" / f"ep{episode:02d}" / filename
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(str(img_path))
 
 
 @app.get("/api/projects/{project_name}/files")
@@ -338,10 +500,133 @@ def list_output_files(project_name: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "api_key_configured": _has_valid_api_key(),
+        "agents_loaded": _agents_cache is not None,
+        "llm_provider": config.get("llm", {}).get("provider", "unknown"),
+        "llm_model": config.get("llm", {}).get("model", "unknown"),
+    }
+
+
+class ConfigUpdate(BaseModel):
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+# ═══════════════════════════════════════════════════
+# v2.1 新增: 内容分级 & 智能分集 API
+# ═══════════════════════════════════════════════════
+
+@app.get("/api/projects/{project_name}/grading-stats")
+def get_grading_stats(project_name: str):
+    """获取内容分级统计（S/A/B比例）"""
+    pipeline = _get_pipeline(project_name)
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    scripts_dir = project_dir / "scripts"
+    if not scripts_dir.exists():
+        return {"stats": None, "message": "尚未生成剧本"}
+
+    # 汇总所有已生成剧本的分级统计
+    total_stats = {"S": 0, "A": 0, "B": 0, "total": 0}
+    for script_file in sorted(scripts_dir.glob("ep*_script.yaml")):
+        try:
+            with open(script_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 统计 content_grade 标记
+            for grade in ["S", "A", "B"]:
+                count = content.count(f"content_grade: {grade}")
+                total_stats[grade] += count
+                total_stats["total"] += count
+        except Exception:
+            pass
+
+    if total_stats["total"] > 0:
+        total_stats["S_ratio"] = round(total_stats["S"] / total_stats["total"] * 100, 1)
+        total_stats["A_ratio"] = round(total_stats["A"] / total_stats["total"] * 100, 1)
+        total_stats["B_ratio"] = round(total_stats["B"] / total_stats["total"] * 100, 1)
+
+    return {"stats": total_stats}
+
+
+@app.get("/api/projects/{project_name}/conflict-map")
+def get_conflict_map(project_name: str):
+    """获取冲突节点分布图数据"""
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    conflict_path = project_dir / "analysis" / "conflict-nodes.json"
+    if not conflict_path.exists():
+        return {"nodes": [], "message": "冲突节点数据不存在，请先运行分析阶段"}
+
+    try:
+        with open(conflict_path, "r", encoding="utf-8") as f:
+            nodes = json.load(f)
+        return {"nodes": nodes, "total": len(nodes)}
+    except Exception as e:
+        return {"nodes": [], "error": str(e)}
+
+
+@app.get("/api/projects/{project_name}/episodes/{episode}/annotations")
+def get_episode_annotations(project_name: str, episode: int):
+    """获取单集标注（看点/伏笔/招商备注）"""
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    annotations_path = project_dir / "planning" / "episode-annotations.json"
+    if not annotations_path.exists():
+        return {"annotations": None, "message": "剧集标注数据不存在"}
+
+    try:
+        with open(annotations_path, "r", encoding="utf-8") as f:
+            all_annotations = json.load(f)
+        for ann in all_annotations:
+            if ann.get("episode_id") == episode:
+                return {"annotations": ann}
+        return {"annotations": None, "message": f"未找到第{episode}集的标注"}
+    except Exception as e:
+        return {"annotations": None, "error": str(e)}
+
+
+class RhythmConfigUpdate(BaseModel):
+    adaptation_mode: str = "balanced"    # strict | balanced | loose
+    target_format: str = "long_drama"    # short_drama | long_drama
+
+
+@app.put("/api/projects/{project_name}/rhythm-config")
+def update_rhythm_config(project_name: str, body: RhythmConfigUpdate):
+    """更新项目的适应度模式和剧集格式"""
+    if body.adaptation_mode not in ("strict", "balanced", "loose"):
+        raise HTTPException(400, "adaptation_mode 必须是 strict/balanced/loose")
+    if body.target_format not in ("short_drama", "long_drama"):
+        raise HTTPException(400, "target_format 必须是 short_drama/long_drama")
+
+    # 更新内存中的 config
+    config.setdefault("content_grading", {})["mode"] = body.adaptation_mode
+    config.setdefault("episode_rhythm", {})["target_format"] = body.target_format
+
+    return {
+        "status": "ok",
+        "adaptation_mode": body.adaptation_mode,
+        "target_format": body.target_format,
+    }
+
+
+@app.post("/api/config")
+def update_config(body: ConfigUpdate):
+    """Update LLM config at runtime (api_key, base_url, model)."""
+    global _agents_cache, _pipelines
+    if body.api_key and body.api_key != "sk-YOUR-API-KEY":
+        config.setdefault("llm", {})["api_key"] = body.api_key
+    if body.base_url:
+        config.setdefault("llm", {})["base_url"] = body.base_url
+    if body.model:
+        config.setdefault("llm", {})["model"] = body.model
+    # Invalidate agent cache so they get recreated with new config
+    _agents_cache = None
+    _pipelines.clear()
+    return {"status": "ok", "api_key_configured": _has_valid_api_key()}
 
 
 # ── Entry ──
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

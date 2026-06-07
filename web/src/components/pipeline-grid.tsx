@@ -7,6 +7,7 @@ import {
   CheckCircle,
   Circle,
   ArrowClockwise,
+  Spinner,
 } from "@phosphor-icons/react";
 import {
   getProjectStatus,
@@ -16,7 +17,7 @@ import {
   type ProjectStatus,
 } from "@/lib/api";
 
-type PhaseStatus = "done" | "active" | "idle";
+type PhaseStatus = "done" | "active" | "idle" | "running";
 
 interface PhaseData {
   id: string;
@@ -29,30 +30,29 @@ interface PhaseData {
 
 const PHASE_META: Omit<PhaseData, "status" | "stats">[] = [
   { id: "ingest", label: "导入", description: "扫描源材料，提取术语和世界观规则" },
-  { id: "analyze", label: "分析", description: "分析叙事结构、角色网络和主题洞察" },
+  { id: "analyze", label: "分析", description: "LLM分析叙事结构、角色网络和主题洞察" },
   { id: "plan", label: "规划", description: "章节到集数的映射，情绪曲线设计" },
-  { id: "write", label: "编写", description: "逐集生成完整剧本，含爆款参考检索" },
-  { id: "review", label: "审核", description: "多维度审核：业务逻辑、合规、对比" },
-  { id: "storyboard", label: "分镜", description: "电影级镜头规划，双轨：Film和Seedance AI" },
+  { id: "write", label: "编写", description: "LLM逐集生成完整剧本，滑窗并行抽取" },
+  { id: "review", label: "审核", description: "LLM多维度审核：业务逻辑、合规、AI评审" },
+  { id: "storyboard", label: "分镜", description: "从剧本解析场景→镜头→节拍，生成序列板" },
 ];
 
-function derivePhases(status: ProjectStatus | null): PhaseData[] {
+function derivePhases(status: ProjectStatus | null, running: boolean): PhaseData[] {
   if (!status) {
-    return PHASE_META.map((p, i) => ({ ...p, status: "idle" as PhaseStatus, index: i }));
+    return PHASE_META.map((p) => ({ ...p, status: "idle" as PhaseStatus }));
   }
 
   const done = new Set(status.phases_completed || []);
   const current = status.current_phase;
 
-  return PHASE_META.map((p, i) => {
+  return PHASE_META.map((p) => {
     let phaseStatus: PhaseStatus = "idle";
     if (done.has(p.id)) phaseStatus = "done";
-    else if (p.id === current) phaseStatus = "active";
+    else if (p.id === current && running) phaseStatus = "running";
 
     const stats: { label: string; value: string }[] = [];
     if (p.id === "write") {
       stats.push({ label: "已编写", value: `${status.episodes_written || 0}` });
-      stats.push({ label: "Agent调用", value: `${status.total_agent_calls || 0}` });
     }
     if (p.id === "review") {
       stats.push({ label: "已审核", value: `${status.episodes_reviewed || 0}` });
@@ -77,14 +77,16 @@ function PhaseCard({ phase }: { phase: PhaseData }) {
         {phase.status === "done" && (
           <CheckCircle size={18} weight="fill" className="text-[#22c55e]" />
         )}
-        {phase.status === "active" && <div className="phase-dot phase-dot-active" />}
+        {phase.status === "running" && (
+          <Spinner size={18} weight="bold" className="text-[#d4a853] animate-spin" />
+        )}
         {phase.status === "idle" && (
           <Circle size={18} weight="bold" className="text-[#3f3f46]" />
         )}
         <span className="text-sm font-semibold text-[#f4f4f5]">{phase.label}</span>
-        {phase.status === "active" && (
+        {phase.status === "running" && (
           <span className="ml-auto text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/20">
-            运行中
+            执行中...
           </span>
         )}
         {phase.status === "done" && (
@@ -115,25 +117,26 @@ function PhaseCard({ phase }: { phase: PhaseData }) {
   );
 }
 
-export default function PipelineGrid() {
-  const [projectName, setProjectName] = useState("青云之路");
+export default function PipelineGrid({ projectName, onProjectChange }: { projectName: string; onProjectChange: (name: string) => void }) {
   const [status, setStatus] = useState<ProjectStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
+  const [progressText, setProgressText] = useState("");
+  const [adaptationMode, setAdaptationMode] = useState("balanced");
+  const [targetFormat, setTargetFormat] = useState("long_drama");
 
   const fetchStatus = useCallback(async () => {
     try {
       const data = await getProjectStatus(projectName);
       setStatus(data);
     } catch {
-      // Project doesn't exist yet
       setStatus(null);
     }
   }, [projectName]);
 
-  // Load project list and status
+  // Load project list and status on mount
   useEffect(() => {
     listProjects().then((res) => {
       setProjects(res.projects.map((p) => p.name));
@@ -141,21 +144,36 @@ export default function PipelineGrid() {
     fetchStatus();
   }, [fetchStatus]);
 
-  // Poll task status
+  // Poll task status with progress updates
   useEffect(() => {
     if (!taskId) return;
+    let count = 0;
+    setProgressText("管线启动中...");
     const interval = setInterval(async () => {
+      count++;
       try {
         const task = await getTaskStatus(taskId);
-        if (task.status === "completed" || task.status === "failed") {
+        if (task.status === "completed") {
           setTaskId(null);
           setLoading(false);
-          if (task.status === "failed") setError(task.error || "任务执行失败");
-          fetchStatus(); // Refresh after task completes
+          setProgressText("✅ 管线完成！");
+          fetchStatus();
+          setTimeout(() => setProgressText(""), 3000);
+        } else if (task.status === "failed") {
+          setTaskId(null);
+          setLoading(false);
+          setProgressText("");
+          setError(task.error || "任务执行失败");
+        } else {
+          // Still running — show elapsed time
+          const mins = Math.floor(count * 2 / 60);
+          const secs = (count * 2) % 60;
+          setProgressText(`⏳ 运行中... ${mins}分${secs}秒`);
         }
       } catch {
         setTaskId(null);
         setLoading(false);
+        setProgressText("");
       }
     }, 2000);
     return () => clearInterval(interval);
@@ -164,25 +182,35 @@ export default function PipelineGrid() {
   const handleRun = async () => {
     setLoading(true);
     setError(null);
+    setProgressText("正在启动管线...");
     try {
       const res = await runAuto(projectName, {
         title: projectName,
         episodes: 3,
-        source_dir: "./sample_novel",
+        source_dir: `./uploads/${projectName}`,
+        adaptation_mode: adaptationMode,
+        target_format: targetFormat,
       });
-      if (res.task_id) setTaskId(res.task_id);
+      if (res.task_id) {
+        setTaskId(res.task_id);
+      } else {
+        setLoading(false);
+        setError("未能获取任务ID");
+      }
     } catch (e) {
       setError(String(e));
       setLoading(false);
+      setProgressText("");
     }
   };
 
   const handleStop = () => {
     setTaskId(null);
     setLoading(false);
+    setProgressText("");
   };
 
-  const phases = derivePhases(status);
+  const phases = derivePhases(status, loading);
 
   return (
     <section id="pipeline" className="py-24 px-6">
@@ -192,15 +220,14 @@ export default function PipelineGrid() {
             管线状态
           </h2>
           <p className="mt-3 text-[#a1a1aa] text-sm max-w-[65ch]">
-            六阶段管线，从源材料导入到电影级分镜。
-            每个阶段由专门的AI Agent负责执行。
+            {'六阶段管线，全部由 LLM Agent 驱动。每个阶段调用 DeepSeek API 进行真实分析。'}
           </p>
 
           {/* Project selector + controls */}
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <select
               value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
+              onChange={(e) => onProjectChange(e.target.value)}
               className="px-3 py-2 text-[13px] rounded-lg bg-[#141416] border border-[#27272a] text-[#f4f4f5] focus:border-[#d4a853] focus:outline-none"
             >
               {projects.map((p) => (
@@ -210,6 +237,31 @@ export default function PipelineGrid() {
                 <option value={projectName}>{projectName}</option>
               )}
             </select>
+
+            {/* v2.1: 适应度模式 & 剧集格式 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-[#71717a]">模式:</span>
+              <select
+                value={adaptationMode}
+                onChange={(e) => setAdaptationMode(e.target.value)}
+                className="px-2.5 py-2 text-[12px] rounded-lg bg-[#141416] border border-[#27272a] text-[#a1a1aa] focus:border-[#d4a853] focus:outline-none"
+              >
+                <option value="strict">忠于原著</option>
+                <option value="balanced">均衡改编</option>
+                <option value="loose">影视节奏</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-[#71717a]">格式:</span>
+              <select
+                value={targetFormat}
+                onChange={(e) => setTargetFormat(e.target.value)}
+                className="px-2.5 py-2 text-[12px] rounded-lg bg-[#141416] border border-[#27272a] text-[#a1a1aa] focus:border-[#d4a853] focus:outline-none"
+              >
+                <option value="long_drama">长剧 (45min)</option>
+                <option value="short_drama">短剧 (3-5min)</option>
+              </select>
+            </div>
 
             <button
               onClick={loading ? handleStop : handleRun}
@@ -221,7 +273,7 @@ export default function PipelineGrid() {
               }`}
             >
               {loading ? (
-                <><Pause size={16} weight="bold" /> 停止</>
+                <><Spinner size={16} weight="bold" className="animate-spin" /> 停止</>
               ) : (
                 <><Play size={16} weight="bold" /> 运行管线</>
               )}
@@ -236,14 +288,27 @@ export default function PipelineGrid() {
 
             {status && (
               <span className="text-[11px] font-mono text-[#71717a]">
-                阶段: {status.current_phase} | Agent调用: {status.total_agent_calls} 次 | 成功率: {status.success_rate}
+                阶段: {status.current_phase} | 成功率: {status.success_rate}
               </span>
             )}
           </div>
 
+          {/* Progress indicator */}
+          {progressText && (
+            <div className={`mt-3 p-3 rounded-lg text-[13px] flex items-center gap-2 ${
+              progressText.startsWith("✅") ? "bg-[#22c55e]/10 border border-[#22c55e]/30 text-[#22c55e]" :
+              progressText.startsWith("⏳") ? "bg-[#d4a853]/10 border border-[#d4a853]/30 text-[#d4a853]" :
+              "bg-[#3b82f6]/10 border border-[#3b82f6]/30 text-[#3b82f6]"
+            }`}>
+              {progressText.startsWith("⏳") && <Spinner size={14} className="animate-spin" />}
+              {progressText}
+            </div>
+          )}
+
           {error && (
             <div className="mt-3 p-3 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/30 text-[13px] text-[#ef4444]">
-              {error}
+              ❌ {error}
+              <button onClick={() => setError(null)} className="ml-4 underline">关闭</button>
             </div>
           )}
         </div>

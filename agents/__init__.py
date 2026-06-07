@@ -24,6 +24,9 @@ from .storyboard_director import StoryboardDirector, create_storyboard_director
 from .storyboard_artist import StoryboardArtist, create_storyboard_artist
 from .art_designer import ArtDesigner, create_art_designer
 from .image_generator import ImageGeneratorAgent, create_image_generator
+# v2.1 新增: 内容分级 & 智能分集
+from .content_grader import ContentGrader, create_content_grader
+from .episode_director import EpisodeDirector, create_episode_director
 
 __all__ = [
     "BaseAgent",
@@ -41,4 +44,7 @@ __all__ = [
     "StoryboardArtist", "create_storyboard_artist",
     "ArtDesigner", "create_art_designer",
     "ImageGeneratorAgent", "create_image_generator",
+    # v2.1
+    "ContentGrader", "create_content_grader",
+    "EpisodeDirector", "create_episode_director",
 ]

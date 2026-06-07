@@ -1,16 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Novel-to-Script Pro - AI驱动的改编管线",
@@ -26,10 +15,9 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className="h-full antialiased"
     >
       <body className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
-        {/* Taste skill Section 6.E: grain on fixed pseudo-element only */}
         <div className="grain-overlay" aria-hidden="true" />
         {children}
       </body>

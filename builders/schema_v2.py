@@ -28,6 +28,17 @@ ATMOSPHERE_VALUES = ["欢快", "忧伤", "紧张", "平静", "温馨", "悬疑",
 TIME_VALUES = ["清晨", "早晨", "上午", "中午", "下午", "傍晚", "黄昏",
                "夜晚", "深夜", "黎明", "未指定"]
 
+# ═══════════════════════════════════════════════════════════════
+# v2.1 新增：内容分级 & 智能分集
+# ═══════════════════════════════════════════════════════════════
+
+CONTENT_GRADES = ["S", "A", "B"]  # 内容分级
+EPISODE_FORMATS = ["short_drama", "long_drama"]  # 剧集格式
+HOOK_TYPES = ["opening_hook", "mid_conflict", "cliffhanger", "foreshadowing"]  # 钩子类型
+CONFLICT_NODE_TYPES = ["major_twist", "scene_shift", "emotional_peak",
+                       "cliffhanger", "resolution_point"]  # 冲突节点类型
+ADAPTATION_MODES = ["strict", "balanced", "loose"]  # 适应度模式
+
 # 必填字段定义
 REQUIRED_METADATA_FIELDS = [
     "script_title", "original_work", "original_author",
@@ -46,6 +57,14 @@ REQUIRED_SCENE_FIELDS = [
 ]
 REQUIRED_ELEMENT_FIELDS = [
     "element_id", "type", "role", "text",
+]
+# v2.1 新增可选元素字段
+OPTIONAL_ELEMENT_FIELDS_V21 = [
+    "content_grade",      # "S" | "A" | "B"
+    "grade_confidence",   # 0.0-1.0
+    "condensed",          # bool (A级压缩标记)
+    "merged_from",        # int (B级合并来源数量)
+    "original_text",      # str (压缩前原文)
 ]
 
 
