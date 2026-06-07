@@ -1,4 +1,5 @@
 # Novel-to-Script Pro v2.3
+视频链接bilibili哔哩哔哩【XEngineer 新工科计划  选题三AI 小说转剧本工具-哔哩哔哩】 https://b23.tv/EJGp5XX
 
 > 🎬 小说 → 剧本 → 分镜 → 生图，AI 驱动的全流程智能改编系统
 
