@@ -84,34 +84,61 @@ class ScriptBuilder:
         include_visual_hint: bool = True,
     ) -> dict:
         """将提取结果构建为完整的 YAML 剧本结构"""
+        return self.build_with_grading(
+            all_elements=all_elements,
+            character_tracker=character_tracker,
+            include_emotion=include_emotion,
+            include_action=include_action,
+            include_subtext=include_subtext,
+            include_visual_hint=include_visual_hint,
+            grading_stats=None,
+        )
 
-        # 1. 元数据
-        metadata = self._build_metadata(all_elements)
+    def build_with_grading(
+        self,
+        all_elements: list,
+        character_tracker=None,
+        include_emotion: bool = True,
+        include_action: bool = True,
+        include_subtext: bool = True,
+        include_visual_hint: bool = True,
+        grading_stats: dict = None,
+    ) -> dict:
+        """
+        分级感知的构建入口。
 
-        # 2. 角色列表（优先使用 CharacterTracker 数据）
-        characters = self._build_characters(all_elements, character_tracker)
-
-        # 3. 章节-场景结构
-        chapters = self._build_chapters(
-            all_elements,
+        Args:
+            all_elements: 提取的结构化元素（可含 content_grade 字段）
+            character_tracker: 角色追踪器
+            include_emotion: 是否包含情绪标注
+            include_action: 是否包含动作标注
+            include_subtext: 是否包含潜台词
+            include_visual_hint: 是否包含视觉化提示
+            grading_stats: 分级统计 {S_count, A_count, B_count, filtered_count, ...}
+        """
+        script = self.build(
+            all_elements=all_elements,
+            character_tracker=character_tracker,
             include_emotion=include_emotion,
             include_action=include_action,
             include_subtext=include_subtext,
             include_visual_hint=include_visual_hint,
         )
 
-        # 4. 情绪曲线（新增）
-        emotion_curve = self._build_emotion_curve(chapters)
-
-        # 5. 组装
-        script = {
-            "script": {
-                "metadata": metadata,
-                "characters": characters,
-                "chapters": chapters,
-                "emotion_curve": emotion_curve,
+        # 如果提供了分级统计，注入元数据
+        if grading_stats:
+            meta = script["script"]["metadata"]
+            meta["content_grading"] = {
+                "enabled": True,
+                "S_count": grading_stats.get("S_count", 0),
+                "A_count": grading_stats.get("A_count", 0),
+                "B_count": grading_stats.get("B_count", 0),
+                "filtered_count": grading_stats.get("filtered_count", 0),
+                "condensed_count": grading_stats.get("condensed_count", 0),
+                "preserved_count": grading_stats.get("preserved_count", 0),
             }
-        }
+            stats = meta.get("statistics", {})
+            stats["graded_elements"] = len(all_elements)
 
         return script
 
@@ -371,6 +398,15 @@ class ScriptBuilder:
                 scene_elem["visual_hint"] = elem["visual_hint"]
             if elem.get("parenthetical"):
                 scene_elem["parenthetical"] = elem["parenthetical"]
+            # v2.1: 内容分级字段
+            if elem.get("content_grade"):
+                scene_elem["content_grade"] = elem["content_grade"]
+                scene_elem["grade_confidence"] = elem.get("grade_confidence", 0)
+            if elem.get("condensed"):
+                scene_elem["condensed"] = True
+                scene_elem["original_text"] = elem.get("original_text", "")
+            if elem.get("merged_from"):
+                scene_elem["merged_from"] = elem["merged_from"]
 
             scene_elements.append(scene_elem)
 

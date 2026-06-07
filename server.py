@@ -107,6 +107,9 @@ def _create_agents() -> dict:
         create_review_director,
         create_continuity_recorder,
         create_storyboard_director,
+        # v2.1
+        create_content_grader,
+        create_episode_director,
     )
 
     _agents_cache = {
@@ -114,11 +117,14 @@ def _create_agents() -> dict:
         "novel-analyzer": create_novel_analyzer(config=config),
         "insight-architect": create_insight_architect(config=config),
         "episode-architect": create_episode_architect(config=config),
+        "episode-director": create_episode_director(config=config),
         "emotion-architect": create_emotion_architect(config=config),
         "script-writer": create_script_writer(config=config),
         "review-director": create_review_director(config=config),
         "continuity-recorder": create_continuity_recorder(config=config),
         "storyboard-director": create_storyboard_director(config=config),
+        # v2.1
+        "content-grader": create_content_grader(config=config),
     }
     return _agents_cache
 
@@ -150,11 +156,16 @@ def _run_phase_task(task_id: str, project_name: str, phase: str, **kwargs):
         _tasks[task_id] = {"status": "failed", "error": str(e)}
 
 
-def _run_auto_task(task_id: str, project_name: str, **kwargs):
+def _run_auto_task(task_id: str, project_name: str, adaptation_mode: str = "balanced", target_format: str = "long_drama", **kwargs):
     """Background: run full auto pipeline."""
     try:
         pipeline = _get_pipeline(project_name)
-        result = pipeline.auto(**kwargs)
+        # v2.1: 传递适应度模式和剧集格式
+        result = pipeline.auto(
+            adaptation_mode=adaptation_mode,
+            target_format=target_format,
+            **kwargs,
+        )
         _tasks[task_id] = {"status": "completed", "result": result}
     except Exception as e:
         _tasks[task_id] = {"status": "failed", "error": str(e)}
@@ -182,6 +193,8 @@ class AutoRequest(BaseModel):
     title: str = ""
     author: str = ""
     episodes: int = 3
+    adaptation_mode: str = "balanced"   # v2.1: strict | balanced | loose
+    target_format: str = "long_drama"   # v2.1: short_drama | long_drama
 
 
 # ═══════════════════════════════════════════════════
@@ -350,6 +363,13 @@ def run_auto(project_name: str, body: AutoRequest, bg: BackgroundTasks):
     """Run full pipeline automatically."""
     task_id = f"{project_name}-auto-{datetime.now().timestamp()}"
     _tasks[task_id] = {"status": "running"}
+
+    # v2.1: 应用适应度模式和剧集格式到配置
+    if body.adaptation_mode:
+        config.setdefault("content_grading", {})["mode"] = body.adaptation_mode
+    if body.target_format:
+        config.setdefault("episode_rhythm", {})["target_format"] = body.target_format
+
     bg.add_task(
         _run_auto_task,
         task_id,
@@ -358,6 +378,8 @@ def run_auto(project_name: str, body: AutoRequest, bg: BackgroundTasks):
         title=body.title,
         author=body.author,
         episodes=body.episodes,
+        adaptation_mode=body.adaptation_mode,
+        target_format=body.target_format,
     )
     return {"task_id": task_id, "status": "started"}
 
@@ -492,6 +514,100 @@ class ConfigUpdate(BaseModel):
     api_key: str = ""
     base_url: str = ""
     model: str = ""
+
+
+# ═══════════════════════════════════════════════════
+# v2.1 新增: 内容分级 & 智能分集 API
+# ═══════════════════════════════════════════════════
+
+@app.get("/api/projects/{project_name}/grading-stats")
+def get_grading_stats(project_name: str):
+    """获取内容分级统计（S/A/B比例）"""
+    pipeline = _get_pipeline(project_name)
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    scripts_dir = project_dir / "scripts"
+    if not scripts_dir.exists():
+        return {"stats": None, "message": "尚未生成剧本"}
+
+    # 汇总所有已生成剧本的分级统计
+    total_stats = {"S": 0, "A": 0, "B": 0, "total": 0}
+    for script_file in sorted(scripts_dir.glob("ep*_script.yaml")):
+        try:
+            with open(script_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 统计 content_grade 标记
+            for grade in ["S", "A", "B"]:
+                count = content.count(f"content_grade: {grade}")
+                total_stats[grade] += count
+                total_stats["total"] += count
+        except Exception:
+            pass
+
+    if total_stats["total"] > 0:
+        total_stats["S_ratio"] = round(total_stats["S"] / total_stats["total"] * 100, 1)
+        total_stats["A_ratio"] = round(total_stats["A"] / total_stats["total"] * 100, 1)
+        total_stats["B_ratio"] = round(total_stats["B"] / total_stats["total"] * 100, 1)
+
+    return {"stats": total_stats}
+
+
+@app.get("/api/projects/{project_name}/conflict-map")
+def get_conflict_map(project_name: str):
+    """获取冲突节点分布图数据"""
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    conflict_path = project_dir / "analysis" / "conflict-nodes.json"
+    if not conflict_path.exists():
+        return {"nodes": [], "message": "冲突节点数据不存在，请先运行分析阶段"}
+
+    try:
+        with open(conflict_path, "r", encoding="utf-8") as f:
+            nodes = json.load(f)
+        return {"nodes": nodes, "total": len(nodes)}
+    except Exception as e:
+        return {"nodes": [], "error": str(e)}
+
+
+@app.get("/api/projects/{project_name}/episodes/{episode}/annotations")
+def get_episode_annotations(project_name: str, episode: int):
+    """获取单集标注（看点/伏笔/招商备注）"""
+    project_dir = PROJECT_ROOT / OUTPUT_DIR / project_name
+    annotations_path = project_dir / "planning" / "episode-annotations.json"
+    if not annotations_path.exists():
+        return {"annotations": None, "message": "剧集标注数据不存在"}
+
+    try:
+        with open(annotations_path, "r", encoding="utf-8") as f:
+            all_annotations = json.load(f)
+        for ann in all_annotations:
+            if ann.get("episode_id") == episode:
+                return {"annotations": ann}
+        return {"annotations": None, "message": f"未找到第{episode}集的标注"}
+    except Exception as e:
+        return {"annotations": None, "error": str(e)}
+
+
+class RhythmConfigUpdate(BaseModel):
+    adaptation_mode: str = "balanced"    # strict | balanced | loose
+    target_format: str = "long_drama"    # short_drama | long_drama
+
+
+@app.put("/api/projects/{project_name}/rhythm-config")
+def update_rhythm_config(project_name: str, body: RhythmConfigUpdate):
+    """更新项目的适应度模式和剧集格式"""
+    if body.adaptation_mode not in ("strict", "balanced", "loose"):
+        raise HTTPException(400, "adaptation_mode 必须是 strict/balanced/loose")
+    if body.target_format not in ("short_drama", "long_drama"):
+        raise HTTPException(400, "target_format 必须是 short_drama/long_drama")
+
+    # 更新内存中的 config
+    config.setdefault("content_grading", {})["mode"] = body.adaptation_mode
+    config.setdefault("episode_rhythm", {})["target_format"] = body.target_format
+
+    return {
+        "status": "ok",
+        "adaptation_mode": body.adaptation_mode,
+        "target_format": body.target_format,
+    }
 
 
 @app.post("/api/config")

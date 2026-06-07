@@ -180,29 +180,31 @@ class Pipeline:
         """
         return self._run_phase("analyze", title=title, author=author, **kwargs)
 
-    def plan(self, episodes: int = 40, **kwargs) -> dict:
+    def plan(self, episodes: int = 40, target_format: str = "long_drama", **kwargs) -> dict:
         """
-        Phase 2: 分集规划 — 章节→集映射，情绪曲线设计。
+        Phase 2: 分集规划 — 章节→集映射（支持智能节奏分集）。
 
         Args:
             episodes: 目标集数
+            target_format: 剧集格式 short_drama | long_drama
 
         Returns:
-            阶段结果 {status, episode_plan, emotion_curve, ...}
+            阶段结果 {status, episode_plan, ...}
         """
-        return self._run_phase("plan", episodes=episodes, **kwargs)
+        return self._run_phase("plan", episodes=episodes, target_format=target_format, **kwargs)
 
-    def write(self, episode: int, **kwargs) -> dict:
+    def write(self, episode: int, adaptation_mode: str = None, **kwargs) -> dict:
         """
-        Phase 3: 剧本生成 — 生成单集完整剧本。
+        Phase 3: 剧本生成 — 生成单集完整剧本（支持内容分级）。
 
         Args:
             episode: 集数
+            adaptation_mode: v2.1 适应度模式 strict | balanced | loose
 
         Returns:
-            阶段结果 {status, script_yaml, script_path, ...}
+            阶段结果 {status, script_yaml, script_path, grading_stats, ...}
         """
-        return self._run_phase("write", episode=episode, **kwargs)
+        return self._run_phase("write", episode=episode, adaptation_mode=adaptation_mode, **kwargs)
 
     def review(self, episode: int, **kwargs) -> dict:
         """
@@ -247,6 +249,8 @@ class Pipeline:
         episodes: int = 3,
         start_phase: str = None,
         stop_phase: str = None,
+        adaptation_mode: str = "balanced",
+        target_format: str = "long_drama",
         **kwargs,
     ) -> dict:
         """
@@ -259,6 +263,8 @@ class Pipeline:
             episodes: 目标集数
             start_phase: 起始阶段（默认从第一个未完成阶段开始）
             stop_phase: 终止阶段（默认执行到最后）
+            adaptation_mode: v2.1 适应度模式 strict | balanced | loose
+            target_format: v2.1 剧集格式 short_drama | long_drama
 
         Returns:
             完整流程报告
@@ -293,7 +299,7 @@ class Pipeline:
                     r = self.analyze(title=title, author=author)
 
                 elif phase == "plan":
-                    r = self.plan(episodes=episodes)
+                    r = self.plan(episodes=episodes, target_format=target_format)
 
                 elif phase == "write":
                     # Pass plan & analysis context to write phase
@@ -304,6 +310,7 @@ class Pipeline:
                             episode=ep,
                             episode_plan=plan_data.get("episode_plan", []),
                             analysis_result=analyze_data,
+                            adaptation_mode=adaptation_mode,
                         )
                         # 审核闭环
                         if self.auto_continue:
@@ -536,15 +543,7 @@ class Pipeline:
         }
 
     def _handle_plan(self, episodes: int = 40, **kwargs) -> dict:
-        """处理 Phase 2: 分集规划"""
-        agent = self.agents.get("episode-architect")
-        if agent:
-            result = agent.execute(
-                episodes=episodes, state_manager=self.state,
-            )
-            return result
-
-        # Fallback: 基于章节数生成简单分集规划
+        """处理 Phase 2: 分集规划 — 支持智能节奏分集"""
         project_dir = os.path.join(self.output_dir, self.project_name)
         sources_dir = os.path.join(project_dir, "sources")
         index_path = os.path.join(sources_dir, "chapters_index.json")
@@ -554,10 +553,44 @@ class Pipeline:
             with open(index_path, "r", encoding="utf-8") as f:
                 chapters = json.load(f)
 
+        # 尝试加载已提取的元素（从 analyze 阶段产出）
+        all_elements = self._load_analyzed_elements()
+
+        # ── 检查是否启用智能分集 ──
+        rhythm_cfg = self.config.get("episode_rhythm", {})
+        use_smart_planning = rhythm_cfg.get("enabled", True) and len(chapters) >= 3
+
+        if use_smart_planning:
+            target_format = rhythm_cfg.get("target_format", "long_drama")
+            director = self.agents.get("episode-director")
+            if director and all_elements:
+                print(f"  🎬 使用智能分集引擎 (格式: {target_format})")
+                result = director.execute(
+                    chapters=chapters,
+                    elements=all_elements,
+                    target_format=target_format,
+                    target_episodes=episodes,
+                    state_manager=self.state,
+                    use_llm=True,
+                )
+                if result.get("status") == "completed":
+                    return result
+                print(f"  ⚠️  智能分集失败: {result.get('error')}，回退到传统分集")
+
+        # 回退: 使用传统 episode-architect 或简单映射
+        agent = self.agents.get("episode-architect")
+        if agent and all_elements:
+            result = agent.execute(
+                episodes=episodes, state_manager=self.state,
+                all_elements=all_elements,
+            )
+            if result.get("status") == "completed":
+                return result
+
+        # Fallback: 简单比例映射
         planning_dir = os.path.join(project_dir, "planning")
         os.makedirs(planning_dir, exist_ok=True)
 
-        # 简单映射: 一章 → 一集
         plan_lines = [
             f"# 分集规划 — {self.project_name}",
             f"\n**目标集数**: {episodes}",
@@ -649,6 +682,52 @@ class Pipeline:
 
         print(f"     ✅ LLM 抽取 {len(elements)} 个结构化元素")
 
+        # ── 内容分级（v2.1 新增）──
+        grading_cfg = self.config.get("content_grading", {})
+        grading_stats = None
+        original_element_count = len(elements)
+
+        if grading_cfg.get("enabled", True) and len(elements) > 10:
+            adaptation_mode = kwargs.get("adaptation_mode") or grading_cfg.get("mode", "balanced")
+            print(f"  📊 内容分级中 (模式: {adaptation_mode})...")
+
+            grader = self.agents.get("content-grader")
+            if grader:
+                try:
+                    # 尝试加载角色网络用于重要性判断
+                    char_network = self._load_character_network()
+                    grade_result = grader.execute(
+                        elements=elements,
+                        mode=adaptation_mode,
+                        character_network=char_network,
+                        use_llm=grading_cfg.get("llm_borderline_review", True),
+                        state_manager=self.state,
+                    )
+                    if grade_result.get("status") == "completed":
+                        # 使用分级处理后的元素
+                        elements = grade_result.get("processed_elements", elements)
+                        grading_stats = grade_result.get("stats", {})
+                        grading_stats["filtered_count"] = grade_result.get("filtered_count", 0)
+                        print(f"     📊 分级完成: S={grading_stats.get('S_count',0)}, "
+                              f"A={grading_stats.get('A_count',0)}, "
+                              f"B={grading_stats.get('B_count',0)}, "
+                              f"过滤 {grading_stats['filtered_count']} 个元素")
+                except Exception as e:
+                    print(f"  ⚠️  内容分级失败: {e}，使用原始元素继续")
+            else:
+                # Fallback: 使用 skill 直接分级
+                try:
+                    from skills.content_grading import ContentGradingSkill
+                    skill = ContentGradingSkill()
+                    graded = skill.grade_elements(elements, mode=adaptation_mode)
+                    max_chars = grading_cfg.get("max_merged_narration_chars", 50)
+                    elements = skill.apply_grading_to_elements(graded, mode=adaptation_mode, max_merged_chars=max_chars)
+                    grading_stats = skill.get_grading_report(graded)
+                    grading_stats["filtered_count"] = original_element_count - len(elements)
+                    print(f"     📊 规则分级完成: 过滤 {grading_stats['filtered_count']} 个元素")
+                except Exception as e:
+                    print(f"  ⚠️  规则分级失败: {e}")
+
         # ── 构建 YAML 剧本 ──
         builder = _get_script_builder(
             title=self.project_name,
@@ -656,10 +735,11 @@ class Pipeline:
             author="AI 辅助改编",
         )
 
-        script = builder.build(
+        script = builder.build_with_grading(
             all_elements=elements,
             include_emotion=True,
             include_action=True,
+            grading_stats=grading_stats,
         )
 
         scripts_dir = os.path.join(project_dir, "scripts")
@@ -678,8 +758,10 @@ class Pipeline:
             "episode": episode,
             "source_chapter": chapter["name"],
             "elements_count": len(elements),
+            "original_element_count": original_element_count,
             "characters_count": char_count,
             "dialogue_count": stats.get("dialogue_count", 0),
+            "grading_stats": grading_stats,
             "script_path": script_path,
             "message": f"第{episode}集剧本已生成: {script_path}",
         }
@@ -941,6 +1023,36 @@ class Pipeline:
             report.append("（无记录）")
 
         return "\n".join(report)
+
+    # ═══════════════════════════════════════════════════════════
+    # 数据加载辅助方法（v2.1 新增）
+    # ═══════════════════════════════════════════════════════════
+
+    def _load_analyzed_elements(self) -> list:
+        """加载分析阶段产生的结构化元素（供 plan/write 阶段复用）"""
+        project_dir = os.path.join(self.output_dir, self.project_name)
+        analysis_dir = os.path.join(project_dir, "analysis")
+        elements_path = os.path.join(analysis_dir, "all_elements.json")
+        if os.path.exists(elements_path):
+            try:
+                with open(elements_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
+
+    def _load_character_network(self) -> dict:
+        """加载角色网络分析结果（供 grading 使用）"""
+        project_dir = os.path.join(self.output_dir, self.project_name)
+        analysis_dir = os.path.join(project_dir, "analysis")
+        network_path = os.path.join(analysis_dir, "character_network.json")
+        if os.path.exists(network_path):
+            try:
+                with open(network_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
 
     # ═══════════════════════════════════════════════════════════
     # 钩子管理

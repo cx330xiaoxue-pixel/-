@@ -124,6 +124,8 @@ export default function PipelineGrid({ projectName, onProjectChange }: { project
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [progressText, setProgressText] = useState("");
+  const [adaptationMode, setAdaptationMode] = useState("balanced");
+  const [targetFormat, setTargetFormat] = useState("long_drama");
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -186,6 +188,8 @@ export default function PipelineGrid({ projectName, onProjectChange }: { project
         title: projectName,
         episodes: 3,
         source_dir: `./uploads/${projectName}`,
+        adaptation_mode: adaptationMode,
+        target_format: targetFormat,
       });
       if (res.task_id) {
         setTaskId(res.task_id);
@@ -233,6 +237,31 @@ export default function PipelineGrid({ projectName, onProjectChange }: { project
                 <option value={projectName}>{projectName}</option>
               )}
             </select>
+
+            {/* v2.1: 适应度模式 & 剧集格式 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-[#71717a]">模式:</span>
+              <select
+                value={adaptationMode}
+                onChange={(e) => setAdaptationMode(e.target.value)}
+                className="px-2.5 py-2 text-[12px] rounded-lg bg-[#141416] border border-[#27272a] text-[#a1a1aa] focus:border-[#d4a853] focus:outline-none"
+              >
+                <option value="strict">忠于原著</option>
+                <option value="balanced">均衡改编</option>
+                <option value="loose">影视节奏</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-[#71717a]">格式:</span>
+              <select
+                value={targetFormat}
+                onChange={(e) => setTargetFormat(e.target.value)}
+                className="px-2.5 py-2 text-[12px] rounded-lg bg-[#141416] border border-[#27272a] text-[#a1a1aa] focus:border-[#d4a853] focus:outline-none"
+              >
+                <option value="long_drama">长剧 (45min)</option>
+                <option value="short_drama">短剧 (3-5min)</option>
+              </select>
+            </div>
 
             <button
               onClick={loading ? handleStop : handleRun}

@@ -79,6 +79,27 @@ compliance:
   custom_blacklist: []              # 自定义禁用词列表
   target_platform: "generic"        # 目标平台: generic | youku | iqiyi | tencent | bilibili
 
+# ── 内容分级配置 ──
+content_grading:
+  enabled: true                    # 是否启用内容分级
+  mode: "balanced"                 # strict(忠于原著) | balanced(默认) | loose(适配影视节奏)
+  s_level_threshold: 0.6           # S级置信度阈值 (0-1)
+  a_level_threshold: 0.35          # A级置信度阈值 (0-1)
+  max_merged_narration_chars: 50   # B级合并旁白最大字数
+  llm_borderline_review: true      # 是否LLM复核边界案例
+  repetition_similarity: 0.6       # 重复检测相似度阈值
+
+# ── 智能分集配置 ──
+episode_rhythm:
+  enabled: true                    # 是否启用智能分集
+  target_format: "long_drama"      # short_drama(3-5min/集) | long_drama(45min/集)
+  short_drama_scenes: 2            # 短剧每集场景数
+  long_drama_scenes: 10            # 长剧每集场景数
+  cliffhanger_required: true       # 每集是否必须有悬念结尾
+  min_conflict_per_episode: 1      # 每集最小冲突节点数
+  max_chapters_per_episode: 5      # 每集最大覆盖章节数
+  generate_investor_notes: true    # 是否生成招商审核备注
+
 # ── 知识库配置 ──
 knowledge:
   sources_dir: "./sources"          # 原始材料目录

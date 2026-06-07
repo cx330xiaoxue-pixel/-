@@ -13,8 +13,24 @@ import {
   Eye,
   Code,
   Image as ImageIcon,
+  Star,
+  Lightning,
+  Target,
+  FlagBanner,
+  WarningCircle,
 } from "@phosphor-icons/react";
-import { getScript, getReport, listOutputFiles, type ScriptData } from "@/lib/api";
+import {
+  getScript,
+  getReport,
+  listOutputFiles,
+  getGradingStats,
+  getConflictMap,
+  getEpisodeAnnotations,
+  type ScriptData,
+  type GradingStats,
+  type ConflictNode,
+  type EpisodeAnnotations,
+} from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -122,6 +138,12 @@ function ScriptPanel({ projectName }: { projectName: string }) {
   const sceneCount = script?.content ? (script.content.match(/scene_id/g) || []).length : 0;
   const elemCount = script?.content ? (script.content.match(/element_id/g) || []).length : 0;
 
+  // v2.1: 分级统计
+  const [gradingStats, setGradingStats] = useState<GradingStats | null>(null);
+  useEffect(() => {
+    getGradingStats(projectName).then(r => { if (r.stats && r.stats.total > 0) setGradingStats(r.stats); }).catch(() => {});
+  }, [projectName, script]);
+
   // YAML → 纯文本剧本
   const handleDownloadTxt = () => {
     if (!script?.content) return;
@@ -216,6 +238,37 @@ function ScriptPanel({ projectName }: { projectName: string }) {
         <button onClick={() => setView("yaml")} className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${view === "yaml" ? "bg-[#09090b] text-[#d4a853]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}><Code size={14} /> YAML</button>
         <button onClick={() => setView("preview")} className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-md transition-all ${view === "preview" ? "bg-[#09090b] text-[#d4a853]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}><Eye size={14} /> 预览</button>
       </div>
+
+      {/* v2.1: 内容分级统计 */}
+      {gradingStats && (
+        <div className="card-surface p-4 flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Star size={16} weight="fill" className="text-[#22c55e]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">S级核心</span>
+            <span className="text-lg font-mono font-semibold text-[#22c55e]">{gradingStats.S_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.S_ratio}%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Lightning size={16} weight="fill" className="text-[#d4a853]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">A级辅助</span>
+            <span className="text-lg font-mono font-semibold text-[#d4a853]">{gradingStats.A_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.A_ratio}%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <WarningCircle size={16} weight="fill" className="text-[#ef4444]" />
+            <span className="text-[13px] text-[#f4f4f5] font-medium">B级冗余</span>
+            <span className="text-lg font-mono font-semibold text-[#ef4444]">{gradingStats.B_count}</span>
+            <span className="text-[11px] text-[#71717a]">({gradingStats.B_ratio}% · 已过滤)</span>
+          </div>
+          <div className="flex-1 h-2 bg-[#18181b] rounded-full overflow-hidden min-w-[120px]">
+            <div className="flex h-full">
+              <div style={{ width: `${gradingStats.S_ratio}%` }} className="bg-[#22c55e] transition-all" />
+              <div style={{ width: `${gradingStats.A_ratio}%` }} className="bg-[#d4a853] transition-all" />
+              <div style={{ width: `${gradingStats.B_ratio}%` }} className="bg-[#ef4444]/30 transition-all" />
+            </div>
+          </div>
+        </div>
+      )}
       {loading ? <div className="card-surface p-12 flex items-center justify-center"><p className="text-sm text-[#71717a]">加载中...</p></div>
       : error ? <EmptyState icon={Article} title="暂无剧本" desc="运行管线以生成剧本。" />
       : view === "yaml" ? <YamlViewer content={script?.content || "# 暂无数据"} />
@@ -315,54 +368,193 @@ function StoryboardPanel({ projectName }: { projectName: string }) {
   );
 }
 
-/* ── Plan Panel ── */
+/* ── Plan Panel (v2.1 enhanced) ── */
 function PlanPanel({ projectName }: { projectName: string }) {
   const [plan, setPlan] = useState<string | null>(null);
   const [emotion, setEmotion] = useState<any[] | null>(null);
+  const [conflictNodes, setConflictNodes] = useState<ConflictNode[]>([]);
+  const [selectedEp, setSelectedEp] = useState(1);
+  const [annotations, setAnnotations] = useState<EpisodeAnnotations | null>(null);
+
   useEffect(() => {
     getReport(projectName, "plan").then(r => setPlan(r.content)).catch(() => setPlan(null));
     getReport(projectName, "emotion").then(r => {
       try { setEmotion(JSON.parse(r.content)); } catch { setEmotion(null); }
     }).catch(() => setEmotion(null));
+    getConflictMap(projectName).then(r => { if (r.nodes) setConflictNodes(r.nodes); }).catch(() => {});
   }, [projectName]);
+
+  // Load annotations for selected episode
+  useEffect(() => {
+    getEpisodeAnnotations(projectName, selectedEp)
+      .then(r => { if (r.annotations) setAnnotations(r.annotations); else setAnnotations(null); })
+      .catch(() => setAnnotations(null));
+  }, [projectName, selectedEp]);
+
+  const nodeTypes: Record<string, { icon: string; color: string }> = {
+    major_twist: { icon: "🔀", color: "#ef4444" },
+    scene_shift: { icon: "🎬", color: "#3b82f6" },
+    emotional_peak: { icon: "📈", color: "#22c55e" },
+    cliffhanger: { icon: "🪝", color: "#d4a853" },
+    resolution_point: { icon: "✅", color: "#8b5cf6" },
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* 分集规划 */}
       <div className="card-surface p-6 flex flex-col gap-4">
         <div className="flex items-center gap-2.5">
           <TreeStructure size={18} className="text-[#d4a853]" />
           <h3 className="text-sm font-semibold text-[#f4f4f5]">分集规划</h3>
+          {conflictNodes.length > 0 && (
+            <span className="ml-auto text-[11px] font-mono text-[#71717a]">
+              {conflictNodes.length} 冲突节点
+            </span>
+          )}
         </div>
-        {plan ? <pre className="text-[13px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap font-mono">{plan}</pre>
+
+        {/* 冲突节点分布 */}
+        {conflictNodes.length > 0 && (
+          <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+            <div className="text-[11px] text-[#71717a] mb-2 font-medium">冲突节点分布</div>
+            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
+              {conflictNodes.map((n) => {
+                const nt = nodeTypes[n.type] || { icon: "•", color: "#71717a" };
+                return (
+                  <span key={n.node_id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-[#18181b] border border-[#27272a]"
+                    title={n.description}>
+                    <span>{nt.icon}</span>
+                    <span className="text-[#a1a1aa]">第{n.chapter_id}章</span>
+                    <span style={{ color: nt.color }} className="font-mono">{n.type}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {plan ? <pre className="text-[13px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">{plan}</pre>
         : <p className="text-sm text-[#71717a]">暂无规划数据，运行管线后生成。</p>}
       </div>
-      <div className="card-surface p-6 flex flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <ChartBar size={18} className="text-[#d4a853]" />
-          <h3 className="text-sm font-semibold text-[#f4f4f5]">情绪曲线</h3>
+
+      {/* 右侧: 情绪曲线 + 剧集标注 */}
+      <div className="flex flex-col gap-5">
+        {/* 情绪曲线 */}
+        <div className="card-surface p-6 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <ChartBar size={18} className="text-[#d4a853]" />
+            <h3 className="text-sm font-semibold text-[#f4f4f5]">情绪曲线</h3>
+          </div>
+          {emotion && emotion.length > 0 ? (
+            <div className="space-y-3 max-h-[260px] overflow-y-auto">
+              {emotion.map((ep: any) => (
+                <div key={ep.episode_id} className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="flex justify-between text-[13px] mb-1.5">
+                    <span className="text-[#f4f4f5] font-medium">第{ep.episode_id}集</span>
+                    <span className="text-[#71717a] font-mono text-[11px]">峰值{ep.peak_value}/谷值{ep.valley_value}</span>
+                  </div>
+                  <div className="flex items-end gap-0.5 h-12 mb-1.5">
+                    {(ep.emotion_sequence || []).map((v: number, i: number) => (
+                      <div key={i} className="flex-1 rounded-t-sm transition-all" style={{
+                        height: `${Math.max(4, (v / 10) * 100)}%`,
+                        backgroundColor: v >= 7 ? '#22c55e' : v >= 4 ? '#d4a853' : '#ef4444',
+                        opacity: 0.75,
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-[#71717a]">暂无情绪曲线数据。</p>}
         </div>
-        {emotion && emotion.length > 0 ? (
-          <div className="space-y-4">
-            {emotion.map((ep: any) => (
-              <div key={ep.episode_id} className="p-4 rounded-lg bg-[#141416] border border-[#1f1f23]">
-                <div className="flex justify-between text-[13px] mb-2">
-                  <span className="text-[#f4f4f5] font-medium">第{ep.episode_id}集</span>
-                  <span className="text-[#71717a] font-mono">{ep.style} · 峰值{ep.peak_value}/谷值{ep.valley_value}</span>
-                </div>
-                <div className="flex items-end gap-1 h-16 mb-2">
-                  {(ep.emotion_sequence || []).map((v: number, i: number) => (
-                    <div key={i} className="flex-1 rounded-t-sm" style={{
-                      height: `${(v / 10) * 100}%`,
-                      backgroundColor: v >= 7 ? '#22c55e' : v >= 4 ? '#d4a853' : '#ef4444',
-                      opacity: 0.8,
-                    }} />
-                  ))}
-                </div>
-                <p className="text-[12px] text-[#a1a1aa]">{ep.rhythm_description}</p>
-              </div>
+
+        {/* v2.1: 剧集标注 */}
+        <div className="card-surface p-6 flex flex-col gap-4 flex-1">
+          <div className="flex items-center gap-2.5">
+            <FlagBanner size={18} className="text-[#d4a853]" />
+            <h3 className="text-sm font-semibold text-[#f4f4f5]">剧集标注</h3>
+          </div>
+
+          {/* Episode selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[#71717a]">集数:</span>
+            {[1, 2, 3].map((ep) => (
+              <button key={ep} onClick={() => setSelectedEp(ep)} className={`px-2.5 py-1 text-[12px] font-mono rounded-md transition-all ${
+                selectedEp === ep ? "bg-[#d4a853]/10 text-[#d4a853] border border-[#d4a853]/30" : "text-[#a1a1aa] border border-[#27272a] hover:border-[#3f3f46]"}`}>
+                第{ep.toString().padStart(2, "0")}集
+              </button>
             ))}
           </div>
-        ) : <p className="text-sm text-[#71717a]">暂无情绪曲线数据。</p>}
+
+          {annotations ? (
+            <div className="space-y-3 max-h-[350px] overflow-y-auto">
+              {/* 开篇钩子 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#d4a853] font-medium mb-1">
+                  <Target size={12} weight="fill" /> 开篇钩子
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.opening_hook}</p>
+              </div>
+
+              {/* 中段冲突 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#ef4444] font-medium mb-1">
+                  <Lightning size={12} weight="fill" /> 中段冲突
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.mid_conflict}</p>
+              </div>
+
+              {/* 结尾悬念 */}
+              <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#3b82f6] font-medium mb-1">
+                  <Star size={12} weight="fill" /> 结尾悬念
+                </div>
+                <p className="text-[12px] text-[#a1a1aa]">{annotations.cliffhanger}</p>
+              </div>
+
+              {/* 核心看点 */}
+              {annotations.highlights && annotations.highlights.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="text-[11px] text-[#22c55e] font-medium mb-1.5">核心看点</div>
+                  <div className="space-y-1">
+                    {annotations.highlights.map((h, i) => (
+                      <div key={i} className="text-[12px] text-[#a1a1aa]">{h}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 伏笔 */}
+              {annotations.foreshadowing && annotations.foreshadowing.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <div className="text-[11px] text-[#8b5cf6] font-medium mb-1.5">剧情伏笔</div>
+                  <div className="space-y-1.5">
+                    {annotations.foreshadowing.map((f, i) => (
+                      <div key={i} className="text-[12px] text-[#a1a1aa] flex items-start gap-1.5">
+                        <span className="text-[10px] text-[#8b5cf6] mt-0.5">◆</span>
+                        <span>{f.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 招商备注摘要 */}
+              {annotations.investor_notes && (
+                <details className="p-3 rounded-lg bg-[#141416] border border-[#1f1f23]">
+                  <summary className="text-[11px] text-[#71717a] font-medium cursor-pointer hover:text-[#a1a1aa]">
+                    招商/审核参考
+                  </summary>
+                  <pre className="mt-2 text-[11px] text-[#71717a] whitespace-pre-wrap font-mono leading-relaxed max-h-[150px] overflow-y-auto">
+                    {annotations.investor_notes}
+                  </pre>
+                </details>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-[#71717a]">运行管线后查看剧集标注（看点/伏笔/招商备注）。</p>
+          )}
+        </div>
       </div>
     </div>
   );
