@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.pipeline import Pipeline, create_pipeline
+from crawler import NovelSearcher, NovelDownloader
 
 # ── Load env vars ──
 try:
@@ -133,7 +134,9 @@ def _get_pipeline(project_name: str) -> Pipeline:
     """Get or create a pipeline for a project."""
     with _lock:
         if project_name not in _pipelines:
-            agents = _create_agents() if _has_valid_api_key() else {}
+            # Always create agents — they fall back to rule-based mode
+            # when no LLM API key is configured.
+            agents = _create_agents()
             _pipelines[project_name] = create_pipeline(
                 project_name=project_name,
                 output_dir=OUTPUT_DIR,
@@ -195,6 +198,58 @@ class AutoRequest(BaseModel):
     episodes: int = 3
     adaptation_mode: str = "balanced"   # v2.1: strict | balanced | loose
     target_format: str = "long_drama"   # v2.1: short_drama | long_drama
+
+class ReviseRequest(BaseModel):
+    modification_notes: str             # 用户修改意见
+    adaptation_mode: str = "balanced"   # v2.1: strict | balanced | loose
+
+class CrawlSearchRequest(BaseModel):
+    keyword: str = ""
+    genre: str = ""                     # 玄幻/武侠/都市/言情...
+    limit: int = 20
+
+class CrawlDownloadRequest(BaseModel):
+    source_url: str
+    source_name: str = ""
+    title: str = ""
+    max_chapters: int = 50
+
+
+# ═══════════════════════════════════════════════════
+# Crawler
+# ═══════════════════════════════════════════════════
+
+@app.post("/api/crawl/search")
+def crawl_search(body: CrawlSearchRequest):
+    """Search novels from public sources by keyword and genre."""
+    try:
+        searcher = NovelSearcher()
+        results = searcher.search(keyword=body.keyword, genre=body.genre, limit=body.limit)
+        return {"status": "ok", "results": results, "total": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
+
+
+@app.post("/api/projects/{project_name}/crawl/download")
+def crawl_download(project_name: str, body: CrawlDownloadRequest):
+    """Download a novel from a public source and save to project uploads dir."""
+    upload_dir = PROJECT_ROOT / "uploads" / project_name
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        downloader = NovelDownloader()
+        result = downloader.download(
+            source_url=body.source_url,
+            output_dir=str(upload_dir),
+            title=body.title,
+            max_chapters=body.max_chapters,
+        )
+        if result.get("status") == "failed":
+            raise HTTPException(status_code=500, detail=result.get("error", "下载失败"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════
@@ -322,6 +377,21 @@ def run_write(project_name: str, episode: int, bg: BackgroundTasks):
     return {"task_id": task_id, "status": "started"}
 
 
+@app.post("/api/projects/{project_name}/revise/{episode}")
+def run_revise(project_name: str, episode: int, body: ReviseRequest, bg: BackgroundTasks):
+    """Accept user modification notes and re-generate the script."""
+    task_id = f"{project_name}-revise-{episode}-{datetime.now().timestamp()}"
+    _tasks[task_id] = {"status": "running"}
+    # Re-run write phase with revision notes — pipeline handles versioned output
+    bg.add_task(
+        _run_phase_task, task_id, project_name, "write",
+        episode=episode,
+        revision_notes=body.modification_notes,
+        adaptation_mode=body.adaptation_mode,
+    )
+    return {"task_id": task_id, "status": "started"}
+
+
 @app.post("/api/projects/{project_name}/review/{episode}")
 def run_review(project_name: str, episode: int, bg: BackgroundTasks):
     """Phase 4: Review episode."""
@@ -402,14 +472,38 @@ def get_task_status(task_id: str):
 # ═══════════════════════════════════════════════════
 
 @app.get("/api/projects/{project_name}/scripts/{episode}")
-def get_script(project_name: str, episode: int):
-    """Read a generated script YAML file."""
-    script_path = PROJECT_ROOT / OUTPUT_DIR / project_name / "scripts" / f"ep{episode:02d}_script.yaml"
+def get_script(project_name: str, episode: int, version: int = 0):
+    """Read a generated script YAML file. version=0 returns latest, version=N returns vN."""
+    scripts_dir = PROJECT_ROOT / OUTPUT_DIR / project_name / "scripts"
+    base = f"ep{episode:02d}_script"
+
+    if version > 0:
+        script_path = scripts_dir / f"{base}_v{version}.yaml"
+    else:
+        # Find latest version
+        candidates = sorted(scripts_dir.glob(f"{base}*.yaml"))
+        if not candidates:
+            raise HTTPException(status_code=404, detail=f"Script for episode {episode} not found")
+        script_path = candidates[-1]  # last = latest version
+
     if not script_path.exists():
-        raise HTTPException(status_code=404, detail=f"Script for episode {episode} not found")
+        raise HTTPException(status_code=404, detail=f"Script for episode {episode} v{version} not found")
     with open(script_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return {"episode": episode, "content": content, "path": str(script_path)}
+
+    # Extract version from filename
+    fname = script_path.stem  # ep01_script or ep01_script_v2
+    if "_v" in fname:
+        file_version = int(fname.split("_v")[-1])
+    else:
+        file_version = 1
+
+    return {
+        "episode": episode,
+        "version": file_version,
+        "content": content,
+        "path": str(script_path),
+    }
 
 
 @app.get("/api/projects/{project_name}/reports/{report_type}")

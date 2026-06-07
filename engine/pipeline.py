@@ -26,6 +26,7 @@ if sys.platform == 'win32':
 
 import os
 import json
+import glob
 import time
 from datetime import datetime
 from typing import Any, Callable, Optional
@@ -653,34 +654,51 @@ class Pipeline:
         chapter = chapters[chapter_idx]
         print(f"  📝 生成第{episode}集剧本 ← 第{chapter_idx + 1}章: {chapter['name']}")
 
-        # ── LLM 抽取结构化元素 ──
-        if self.llm_extractor is None:
-            return {
-                "status": "failed",
-                "error": "LLM 抽取器未初始化，请先配置 API Key",
-            }
+        # ── 抽取结构化元素 (LLM优先，无API Key时fallback到规则抽取) ──
+        elements = []
+        extracted_by = "unknown"
 
-        try:
-            # extract_from_chapter 支持滑窗处理长章节
-            elements = self.llm_extractor.extract_from_chapter(
-                chapter_text=chapter["content"],
-                chapter_id=episode,
-                chapter_title=chapter["name"],
-                chapter_context=f"第{chapter_idx + 1}章",
-            )
-        except Exception as e:
-            return {
-                "status": "failed",
-                "error": f"LLM 抽取失败: {e}",
-            }
+        if self.llm_extractor is not None:
+            try:
+                # extract_from_chapter 支持滑窗处理长章节
+                elements = self.llm_extractor.extract_from_chapter(
+                    chapter_text=chapter["content"],
+                    chapter_id=episode,
+                    chapter_title=chapter["name"],
+                    chapter_context=f"第{chapter_idx + 1}章",
+                )
+                extracted_by = "llm"
+            except Exception as e:
+                print(f"  ⚠️  LLM 抽取失败: {e}，回退到规则抽取...")
+
+        # Fallback: 规则抽取（无需 API Key）
+        if not elements and self.rule_extractor is not None:
+            try:
+                elements = self.rule_extractor.extract_from_chapter(
+                    chapter_text=chapter["content"],
+                    chapter_id=episode,
+                    chapter_title=chapter["name"],
+                )
+                extracted_by = "rule"
+                print(f"     📋 规则抽取 {len(elements)} 个元素")
+            except Exception as e:
+                return {
+                    "status": "failed",
+                    "error": f"规则抽取失败: {e}",
+                }
 
         if not elements:
             return {
                 "status": "failed",
-                "error": f"LLM 未从章节 '{chapter['name']}' 中抽取到任何元素",
+                "error": (
+                    "未从章节中抽取到任何元素。"
+                    "请配置 LLM API Key (config.yaml 或 .env 中的 LLM_API_KEY)"
+                    if self.llm_extractor is None and self.rule_extractor is None
+                    else f"抽取器未能从章节 '{chapter['name']}' 中抽取到元素"
+                ),
             }
 
-        print(f"     ✅ LLM 抽取 {len(elements)} 个结构化元素")
+        print(f"     ✅ {extracted_by.upper()} 抽取 {len(elements)} 个结构化元素")
 
         # ── 内容分级（v2.1 新增）──
         grading_cfg = self.config.get("content_grading", {})
@@ -729,26 +747,59 @@ class Pipeline:
                     print(f"  ⚠️  规则分级失败: {e}")
 
         # ── 构建 YAML 剧本 ──
+        revision_notes = kwargs.get("revision_notes", "")
+        author_line = "AI 辅助改编"
+        if revision_notes:
+            author_line += f" · 用户微调: {revision_notes[:80]}"
+
         builder = _get_script_builder(
             title=self.project_name,
             original_work=self.project_name,
-            author="AI 辅助改编",
+            author=author_line,
         )
 
-        script = builder.build_with_grading(
+        script = builder.build(
             all_elements=elements,
             include_emotion=True,
             include_action=True,
-            grading_stats=grading_stats,
         )
+
+        # 在 YAML 中注入修订元数据
+        if revision_notes:
+            script["script"]["metadata"]["revision_notes"] = revision_notes
+            script["script"]["metadata"]["revised_at"] = datetime.now().isoformat()
 
         scripts_dir = os.path.join(project_dir, "scripts")
         os.makedirs(scripts_dir, exist_ok=True)
-        script_path = os.path.join(scripts_dir, f"ep{episode:02d}_script.yaml")
+
+        # ── 版本化：epXX_script_v{N}.yaml ──
+        base_name = f"ep{episode:02d}_script"
+        existing = sorted(glob.glob(os.path.join(scripts_dir, f"{base_name}*.yaml")))
+        if existing:
+            # Find max version from filename stems
+            max_v = 0
+            for p in existing:
+                stem = os.path.splitext(os.path.basename(p))[0]  # ep01_script or ep01_script_v2
+                if "_v" in stem:
+                    try:
+                        v = int(stem.split("_v")[-1])
+                        max_v = max(max_v, v)
+                    except ValueError:
+                        pass
+                else:
+                    max_v = max(max_v, 1)  # original file = v1
+            next_v = max_v + 1
+        else:
+            next_v = 1
+
+        script_path = os.path.join(scripts_dir, f"{base_name}_v{next_v}.yaml")
 
         yaml_content = builder.to_yaml(script)
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(yaml_content)
+
+        if revision_notes:
+            print(f"     ✏️  用户微调: {revision_notes[:60]}... → 版本 v{next_v}")
 
         stats = script.get("script", {}).get("metadata", {}).get("statistics", {})
         char_count = len(script.get("script", {}).get("characters", []))
@@ -774,6 +825,10 @@ class Pipeline:
         if not os.path.exists(script_path):
             return {"status": "failed", "error": f"剧本文件不存在: {script_path}"}
 
+        # Check if LLM API key is available for LLM-enhanced review
+        api_key = self.config.get("llm", {}).get("api_key", "")
+        has_llm = bool(api_key) and api_key != "sk-YOUR-API-KEY" and len(api_key) > 10
+
         agent = self.agents.get("review-director")
         if agent:
             review_dir = os.path.join(project_dir, "review")
@@ -782,10 +837,12 @@ class Pipeline:
                 episode=episode,
                 script_path=script_path,
                 state_manager=self.state,
-                use_llm=True,
+                use_llm=has_llm,
             )
             if result.get("status") == "completed":
                 return result
+            # If agent failed, fall through to fallback
+            print(f"  ⚠️  Agent 审核失败: {result.get('error')}，使用 Fallback")
 
         # 无 Agent 时做基础审核
         review_dir = os.path.join(project_dir, "review")

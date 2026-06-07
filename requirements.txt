@@ -31,6 +31,10 @@ scikit-learn>=1.3.0    # TF-IDF / 余弦相似度检索
 pytest>=7.0.0
 pytest-cov>=4.0.0
 
+# 爬虫（v2.2）
+beautifulsoup4>=4.12.0  # HTML 解析
+lxml>=5.0.0             # 快速 XML/HTML 解析器
+
 # 工具
 python-dotenv>=1.0.0   # .env 加载
 click>=8.0.0           # CLI 框架
