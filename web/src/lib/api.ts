@@ -60,6 +60,7 @@ export interface TaskStatus {
 
 export interface ScriptData {
   episode: number;
+  version?: number;
   content: string;
   path: string;
 }
@@ -231,6 +232,78 @@ export function updateRhythmConfig(
 
 export function getTaskStatus(taskId: string) {
   return fetchJSON<TaskStatus>(`/api/tasks/${encodeURIComponent(taskId)}`);
+}
+
+// ── Crawler ──
+
+export interface CrawlResult {
+  title: string;
+  author: string;
+  summary: string;
+  source_url: string;
+  source_name: string;
+  genre: string;
+  chapter_count?: number;
+}
+
+export interface CrawlDownloadResult {
+  status: string;
+  title: string;
+  file_path: string;
+  file_name: string;
+  chapter_count: number;
+  total_chapters: number;
+  total_chars: number;
+  message: string;
+}
+
+export function crawlSearch(keyword: string = "", genre: string = "", limit: number = 20) {
+  return fetchJSON<{ status: string; results: CrawlResult[]; total: number }>(
+    "/api/crawl/search",
+    {
+      method: "POST",
+      body: JSON.stringify({ keyword, genre, limit }),
+    },
+  );
+}
+
+export function crawlDownload(
+  projectName: string,
+  sourceUrl: string,
+  sourceName: string = "",
+  title: string = "",
+) {
+  return fetchJSON<CrawlDownloadResult>(
+    `/api/projects/${encodeURIComponent(projectName)}/crawl/download`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        source_url: sourceUrl,
+        source_name: sourceName,
+        title: title,
+      }),
+    },
+  );
+}
+
+// ── Revision / Micro-tune ──
+
+export function reviseScript(
+  projectName: string,
+  episode: number,
+  modificationNotes: string,
+  adaptationMode: string = "balanced",
+) {
+  return fetchJSON<{ task_id: string; status: string }>(
+    `/api/projects/${encodeURIComponent(projectName)}/revise/${episode}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        modification_notes: modificationNotes,
+        adaptation_mode: adaptationMode,
+      }),
+    },
+  );
 }
 
 // ── Output files ──
